@@ -1,0 +1,31 @@
+{
+  "risk_level": "HIGH",
+  "confidence": 0.9386301157723218,
+  "interpretation": "SVM risk tier: Low Risk (mapped to HIGH). Model confidence 93.9%. Aggregate score 32.1/100. Forecast indicates increasing dangerous-case activity. Embedding clusters: drug 1 cluster 0, drug 2 cluster 2. Clinician note excerpt: Test high path",
+  "key_factors": [
+    "name_similarity (importance 0.0387)",
+    "drug2_frequency (importance 0.0032)",
+    "description_length (importance 0.0016)",
+    "drug1_frequency (importance 0.0002)",
+    "similarity_score (importance 0.0001)",
+    "co_occurrence (importance 0.0000)"
+  ],
+  "trend": "Forecast indicates increasing dangerous-case activity.",
+  "treatment_plan": [
+    "Immediate action: avoid this combination when possible, escalate to a clinical reviewer, and consider a safer alternative such as Aspirin.",
+    "Reconcile the medication list and document the decision in the chart.",
+    "If proceeding, define monitoring labs or vitals appropriate to the interaction class.",
+    "Pipeline clustering status: No reclustering needed; forecast_error <= threshold"
+  ],
+  "alternatives": [
+    "Aspirin",
+    "Warfarin",
+    "Ibuprofen"
+  ],
+  "recommended_action": "Immediate action: avoid this combination when possible, escalate to a clinical reviewer, and consider a safer alternative such as Aspirin.",
+  "note": "This report aggregates automated signals (SVM, SHAP, SARIMA trend, production clustering, and embedding similarity). It supports\u2014not replaces\u2014clinical judgment.",
+  "drug_1": "Aspirin",
+  "drug_2": "Warfarin",
+  "svm_label": "Low Risk",
+  "total_score": 32.09246645833278
+}
