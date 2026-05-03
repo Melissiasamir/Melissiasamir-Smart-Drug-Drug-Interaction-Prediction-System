@@ -286,10 +286,3 @@ Exact strings and scores depend on data, model seeding, and the submitted pair.
 ## 13. Disclaimer
 
 **This system is for research and educational purposes only.** It is not a medical device, not FDA-cleared or CE-marked software, and must not be used as the sole basis for prescribing, deprescribing, or changing patient care. Drug interaction risk is context-dependent (dose, organ function, genetics, comorbidities, and co-medications). Always consult qualified healthcare professionals and authoritative drug information resources before making clinical decisions.
-
----
-
-## 14. Author section
-
-**Smart Drug–Drug Interaction Prediction System** — repository maintained by **[Melissiasamir](https://github.com/Melissiasamir)** and contributors.  
-If you extend or cite this work in academic or portfolio contexts, please reference this repository and clearly describe which components (baseline ML vs. advanced AI vs. reporting) were used or modified.
