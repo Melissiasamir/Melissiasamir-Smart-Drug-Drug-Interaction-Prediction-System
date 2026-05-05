@@ -111,3 +111,6 @@ streamlit.out.log
 
 # Large model files
 models/pipeline_artifacts.joblib
+
+# Local SMTP credentials (copy from data/smtp_config.example.json)
+data/smtp_config.json

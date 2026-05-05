@@ -60,5 +60,98 @@
       0.0
     ],
     "cluster": 1
+  },
+  "Warfarin": {
+    "name": "Warfarin",
+    "input": "Warfarin",
+    "features": {
+      "name_length": 8.0,
+      "unique_char_ratio": 0.75,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.375,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.12244101175109588,
+      0.0,
+      0.9795280940087671,
+      0.09183075881332191,
+      0.045915379406660954,
+      0.12244101175109588,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 2
+  },
+  "Morphine": {
+    "name": "Morphine",
+    "input": "Morphine",
+    "features": {
+      "name_length": 8.0,
+      "unique_char_ratio": 1.0,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.375,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.12204143628818162,
+      0.0,
+      0.976331490305453,
+      0.12204143628818162,
+      0.045765538608068104,
+      0.12204143628818162,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 2
+  },
+  "Diazepam": {
+    "name": "Diazepam",
+    "input": "Diazepam",
+    "features": {
+      "name_length": 8.0,
+      "unique_char_ratio": 0.875,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.5,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.12215520134321615,
+      0.0,
+      0.9772416107457292,
+      0.10688580117531413,
+      0.06107760067160808,
+      0.12215520134321615,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 1
   }
 }

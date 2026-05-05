@@ -17,7 +17,18 @@ import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
-from utils.alerts import send_email_alert
+from advanced_ai_pipeline.reporting.email_service import send_email
+from advanced_ai_pipeline.reporting.integration import (
+    build_pair_report,
+    load_persisted_report,
+    process_doctor_submission,
+)
+from advanced_ai_pipeline.reporting.user_display import (
+    display_pair_friendly_report,
+    display_user_dashboard,
+    render_user_email_controls,
+)
+from advanced_ai_pipeline.reporting.user_profile import get_user_email
 from utils.data_loader import dataset_description, load_datasets
 from utils.explainability import compute_shap_importance, shap_plot
 from utils.forecasting import forecast_plot
@@ -513,30 +524,12 @@ def risk_class(label: str) -> str:
     return "danger"
 
 
-def should_send_alert(risk_label: str) -> bool:
-    return risk_label != "Low Risk"
-
-
 def recommended_action(risk_label: str, forecast_increasing: bool) -> str:
     if risk_label in {"High Risk", "Dangerous"}:
         return "Immediate action: avoid this drug pair, escalate to the clinical reviewer, and use a safer alternative."
     if forecast_increasing:
         return "Action required: review this drug pair before approval because forecasted dangerous cases are increasing."
     return "Action required: monitor closely and require clinical confirmation before use."
-
-
-def build_alert_explanation(shap_importance: pd.DataFrame, forecast_increasing: bool) -> str:
-    top_features = shap_importance.head(3)
-    feature_lines = [
-        f"- {row['feature']}: SHAP impact {row['abs_importance']:.4f}"
-        for _, row in top_features.iterrows()
-    ]
-    forecast_line = (
-        "- Forecast trend: increasing future dangerous cases."
-        if forecast_increasing
-        else "- Forecast trend: not increasing."
-    )
-    return "\n".join(["Key model drivers:", *feature_lines, forecast_line])
 
 
 def summary_card(label: str, value: str) -> str:
@@ -776,6 +769,12 @@ def render_doctor_dashboard() -> None:
             return
 
         saved_path = save_doctor_interaction(drug_1, drug_2, description)
+        try:
+            report = process_doctor_submission(drug_1, drug_2, description)
+            st.session_state["last_clinical_report"] = report
+            st.session_state.pop("doctor_report_error", None)
+        except Exception as exc:
+            st.session_state["doctor_report_error"] = str(exc)
         st.session_state.doctor_save_message = f"Interaction saved successfully to {saved_path.name}."
         st.rerun()
 
@@ -800,6 +799,8 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     render_dashboard_back_button("user_sidebar")
+    st.divider()
+    render_user_email_controls()
     st.divider()
     drug_a = st.selectbox("Drug A", all_drugs, index=0)
     drug_b = st.selectbox("Drug B", all_drugs, index=min(1, len(all_drugs) - 1))
@@ -829,6 +830,20 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+err = st.session_state.get("doctor_report_error")
+if err:
+    st.warning(f"Clinical report pipeline could not complete after the last doctor save: {err}")
+
+clinical_report = st.session_state.get("last_clinical_report") or load_persisted_report()
+if clinical_report:
+    display_user_dashboard(clinical_report)
+else:
+    status_box(
+        "No clinician report yet",
+        "When a doctor saves a reviewed interaction, a structured report (risk, explanation, plan, alternatives) appears here for the patient-facing view.",
+        "warning",
+    )
+
 if run:
     artifacts = get_artifacts()
     row, row_scaled, prediction = infer_pair(artifacts, drug_a, drug_b)
@@ -857,19 +872,22 @@ if run:
         prediction["label"],
     )
 
+    pair_report = build_pair_report(drug_a, drug_b, artifacts, prediction, shap_importance, scores)
+    st.session_state["pair_report_last"] = pair_report
+
     action = recommended_action(prediction["label"], artifacts.forecast_increasing)
-    alert_result = {"status": "not_triggered", "message": "No alert needed for Low Risk predictions."}
-    alert_explanation = build_alert_explanation(shap_importance, artifacts.forecast_increasing)
-    if should_send_alert(prediction["label"]):
-        alert_result = send_email_alert(
-            drug_a=drug_a,
-            drug_b=drug_b,
-            risk_level=prediction["label"],
-            confidence=prediction["confidence"],
-            total_score=scores["total_score"],
-            explanation=alert_explanation,
-            action=action,
-        )
+    email_notify_result: dict[str, str] | None = None
+    if pair_report.get("risk_level") == "HIGH":
+        user_mail = get_user_email()
+        if user_mail:
+            email_notify_result = send_email(pair_report, user_mail)
+        else:
+            email_notify_result = {
+                "status": "no_recipient",
+                "message": "High risk detected. Add your email in the sidebar and save it to receive alerts.",
+            }
+    else:
+        print("Low risk - no email sent")
 
     label_css = risk_class(prediction["label"])
     total_score = scores["total_score"]
@@ -886,6 +904,8 @@ if run:
         </div>
         """
     )
+
+    display_pair_friendly_report(pair_report)
 
     render_html('<div class="section-title">⚠️ Risk Classification</div>')
     m1, m2, m3 = st.columns(3)
@@ -936,20 +956,20 @@ if run:
         width="stretch",
     )
 
-    render_html('<div class="section-title">🚨 Alert Status</div>')
+    render_html('<div class="section-title">🚨 Email alert status</div>')
     render_html(f"<div class='section-subtitle'>{action}</div>")
-    if alert_result["status"] == "sent":
-        status_box("Alert sent", alert_result["message"], "danger-box")
-        st.success(alert_result["message"])
-    elif alert_result["status"] == "failed":
-        status_box("Alert failed", alert_result["message"], "danger-box")
-        st.error(alert_result["message"])
-    elif alert_result["status"] == "not_configured":
-        status_box("Alert not configured", alert_result["message"], "warning")
-        st.warning(alert_result["message"])
+    if email_notify_result is None:
+        status_box("No high-risk email", "Email alerts are sent only when the summary level is HIGH.", "success")
+        st.info("Low or moderate summary level: no alert email is sent.")
+    elif email_notify_result.get("status") == "sent":
+        status_box("Alert sent", email_notify_result["message"], "danger-box")
+        st.success(email_notify_result["message"])
+    elif email_notify_result.get("status") == "no_recipient":
+        status_box("Email not sent", email_notify_result["message"], "warning")
+        st.warning(email_notify_result["message"])
     else:
-        status_box("No alert required", alert_result["message"], "success")
-        st.info(alert_result["message"])
+        status_box("Email not sent", email_notify_result.get("message", "Unknown error"), "warning")
+        st.error(email_notify_result.get("message", "Email could not be sent. Check data/smtp_config.json."))
 
     render_html('<div class="section-title">🔁 Adaptive Behavior</div>')
     with st.expander("Dynamic reclustering status", expanded=True):
@@ -1036,7 +1056,7 @@ else:
                 <div class="overview-item"><b>⚠️ Classification</b><br><span class="muted">SVM with RBF kernel is optimized using GridSearchCV and cross-validation.</span></div>
                 <div class="overview-item"><b>📈 Forecasting</b><br><span class="muted">SARIMA forecasts dangerous risk counts and supports dynamic reclustering.</span></div>
                 <div class="overview-item"><b>🧮 Scoring</b><br><span class="muted">Score = Confidence x Feature Importance; Total Score = SVM + SHAP + Forecast.</span></div>
-                <div class="overview-item"><b>🚨 Alerts</b><br><span class="muted">SMTP email alerts are sent for dangerous predictions with increasing forecast.</span></div>
+                <div class="overview-item"><b>🚨 Alerts</b><br><span class="muted">When the easy-read summary is HIGH, an email goes to your saved address using data/smtp_config.json.</span></div>
             </div>
         </div>
         """
