@@ -60,6 +60,13 @@ def _sensitivity_importance(
     return np.array(values, dtype=float)
 
 
+def _as_feature_frame(values, feature_names: list[str]) -> pd.DataFrame:
+    """Keep feature names attached when SHAP supplies NumPy arrays."""
+    if isinstance(values, pd.DataFrame):
+        return values.loc[:, feature_names]
+    return pd.DataFrame(values, columns=feature_names)
+
+
 def compute_shap_importance(model, background_scaled: pd.DataFrame, row_scaled: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
     """Compute SHAP values for a single prediction, with a deterministic fallback."""
     feature_names = list(feature_names)
@@ -70,7 +77,10 @@ def compute_shap_importance(model, background_scaled: pd.DataFrame, row_scaled: 
         import shap
 
         background = shap.sample(background_scaled, min(40, len(background_scaled)), random_state=42)
-        explainer = shap.KernelExplainer(model.predict_proba, background)
+        def predict_proba_with_names(values):
+            return model.predict_proba(_as_feature_frame(values, feature_names))
+
+        explainer = shap.KernelExplainer(predict_proba_with_names, background)
         shap_values = explainer.shap_values(row_scaled, nsamples=100)
         values = _single_row_shap_values(shap_values, pred_idx, n_features)
         if len(values) != n_features:

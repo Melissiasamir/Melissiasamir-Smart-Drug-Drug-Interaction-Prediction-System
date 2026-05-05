@@ -30,11 +30,28 @@ from utils.self_learning import SelfLearningEngine, SelfLearningConfig
 load_dotenv()
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+RUNTIME_DIR = PROJECT_ROOT / ".streamlit_runtime"
+SELF_LEARNING_SAMPLES_PATH = PROJECT_ROOT / "data" / "self_learning_samples.csv"
+DOCTOR_INTERACTIONS_SOURCE_PATH = PROJECT_ROOT / "data" / "doctor_added_interactions.xlsx"
+
+
+def resolve_writable_path(preferred_path: Path) -> Path:
+    """Use the preferred path when writable, otherwise store generated files locally."""
+    try:
+        preferred_path.parent.mkdir(parents=True, exist_ok=True)
+        probe = preferred_path.parent / ".write_probe.tmp"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred_path
+    except OSError:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        return RUNTIME_DIR / preferred_path.name
+
+
 BACKGROUND_IMAGE_CANDIDATES = [
-    Path(__file__).resolve().parent
-    / "Pin by Ashwin Raj on Set Wallpapers _ Science drawing, Science poster, Chemistry posters.jpg",
-    Path(__file__).resolve().parent.parent
-    / "Pin by Ashwin Raj on Set Wallpapers _ Science drawing, Science poster, Chemistry posters.jpg",
+    PROJECT_ROOT / "Pin by Ashwin Raj on Set Wallpapers _ Science drawing, Science poster, Chemistry posters.jpg",
+    PROJECT_ROOT.parent / "Pin by Ashwin Raj on Set Wallpapers _ Science drawing, Science poster, Chemistry posters.jpg",
 ]
 BACKGROUND_IMAGE_PATH = next((path for path in BACKGROUND_IMAGE_CANDIDATES if path.exists()), None)
 BACKGROUND_IMAGE_CSS = (
@@ -470,17 +487,21 @@ def get_drug_options() -> list[str]:
 @st.cache_resource(show_spinner=False)
 def get_self_learning_engine() -> SelfLearningEngine:
     """Initialize self-learning engine with config and load persisted samples if available."""
+    samples_path = resolve_writable_path(SELF_LEARNING_SAMPLES_PATH)
     config = SelfLearningConfig(
         sample_collection_threshold=20,
         uncertainty_confidence_threshold=0.6,
         augmentation_noise_std=0.05,
         persist_to_csv=True,
-        csv_path=Path(__file__).resolve().parent / "data" / "self_learning_samples.csv",
+        csv_path=samples_path,
         log_actions=True,
     )
     engine = SelfLearningEngine(config)
     # Try to load persisted samples from previous sessions
-    engine.load_samples()
+    if samples_path.exists():
+        engine.load_samples(samples_path)
+    elif samples_path != SELF_LEARNING_SAMPLES_PATH and SELF_LEARNING_SAMPLES_PATH.exists():
+        engine.load_samples(SELF_LEARNING_SAMPLES_PATH)
     return engine
 
 
@@ -537,7 +558,7 @@ def go_to_dashboard_picker() -> None:
 
 
 def render_dashboard_back_button(location: str) -> None:
-    if st.button("Back to Dashboard Selection", key=f"back_to_dashboard_picker_{location}", use_container_width=True):
+    if st.button("Back to Dashboard Selection", key=f"back_to_dashboard_picker_{location}", width="stretch"):
         go_to_dashboard_picker()
 
 
@@ -577,12 +598,14 @@ def score_tone(total_score: float) -> str:
 
 
 def doctor_interactions_path() -> Path:
-    return Path(__file__).resolve().parent / "data" / "doctor_added_interactions.xlsx"
+    return resolve_writable_path(DOCTOR_INTERACTIONS_SOURCE_PATH)
 
 
 def load_doctor_interactions() -> pd.DataFrame:
     path = doctor_interactions_path()
     columns = ["Submitted At", "Drug 1", "Drug 2", "Interaction Description"]
+    if not path.exists() and path != DOCTOR_INTERACTIONS_SOURCE_PATH and DOCTOR_INTERACTIONS_SOURCE_PATH.exists():
+        path = DOCTOR_INTERACTIONS_SOURCE_PATH
     if not path.exists():
         return pd.DataFrame(columns=columns)
     return pd.read_excel(path)
@@ -640,11 +663,11 @@ def choose_dashboard() -> str:
     )
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("User Dashboard", type="primary", use_container_width=True):
+        if st.button("User Dashboard", type="primary", width="stretch"):
             st.session_state.dashboard = "user"
             st.rerun()
     with col2:
-        if st.button("Dr Dashboard", use_container_width=True):
+        if st.button("Dr Dashboard", width="stretch"):
             st.session_state.dashboard = "doctor"
             st.rerun()
     st.stop()
@@ -724,7 +747,7 @@ def render_doctor_dashboard() -> None:
                 height=180,
                 placeholder="Describe the clinical interaction, expected risk, and any monitoring or avoidance advice.",
             )
-            submitted = st.form_submit_button("Add Interaction", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Add Interaction", type="primary", width="stretch")
 
     with right:
         render_html(
@@ -736,7 +759,7 @@ def render_doctor_dashboard() -> None:
             """
         )
         if total_entries:
-            st.dataframe(doctor_df.tail(6).iloc[::-1], use_container_width=True, hide_index=True)
+            st.dataframe(doctor_df.tail(6).iloc[::-1], width="stretch", hide_index=True)
         else:
             status_box(
                 "No doctor records yet",
@@ -783,7 +806,7 @@ with st.sidebar:
     with st.expander("Use custom drug names", expanded=False):
         custom_a = st.text_input("Custom Drug A", "")
         custom_b = st.text_input("Custom Drug B", "")
-    run = st.button("Analyze Risk", type="primary", use_container_width=True)
+    run = st.button("Analyze Risk", type="primary", width="stretch")
 
     st.divider()
     with st.expander("Dataset Description", expanded=False):
@@ -888,20 +911,20 @@ if run:
     )
     prob_fig.update_traces(marker_line_width=0, opacity=0.92, hovertemplate="%{x}<br>Probability: %{y:.2%}<extra></extra>")
     polish_plotly(prob_fig, height=330)
-    st.plotly_chart(prob_fig, use_container_width=True)
+    st.plotly_chart(prob_fig, width="stretch")
 
     left, right = st.columns(2)
     with left:
         render_html('<div class="section-title">📊 SHAP Explanation</div>')
         shap_fig = polish_plotly(shap_plot(shap_importance), height=390)
-        st.plotly_chart(shap_fig, use_container_width=True)
+        st.plotly_chart(shap_fig, width="stretch")
         with st.expander("What this means", expanded=False):
             st.write("SHAP shows which features pushed the model decision most strongly for this drug pair.")
     with right:
         render_html('<div class="section-title">📈 Forecast Analysis</div>')
         forecast_fig = polish_plotly(forecast_plot(artifacts.risk_series, artifacts.forecast), height=390)
         forecast_fig.update_traces(line=dict(width=3), mode="lines+markers", hovertemplate="%{x|%b %d, %Y}<br>Risk count: %{y:.3f}<extra></extra>")
-        st.plotly_chart(forecast_fig, use_container_width=True)
+        st.plotly_chart(forecast_fig, width="stretch")
         with st.expander("Forecast signal", expanded=False):
             trend = "increasing" if artifacts.forecast_increasing else "not increasing"
             st.write(f"SARIMA forecasts dangerous risk counts over time. Current forecast trend is {trend}.")
@@ -910,7 +933,7 @@ if run:
     st.progress(min(max(float(total_score) / 100, 0), 1))
     st.dataframe(
         pd.DataFrame([scores]).T.rename(columns={0: "Value"}).style.format("{:.4f}"),
-        use_container_width=True,
+        width="stretch",
     )
 
     render_html('<div class="section-title">🚨 Alert Status</div>')

@@ -1,0 +1,2 @@
+drug_a,drug_b,prediction_label,confidence,is_uncertain,timestamp,drug1_frequency,drug2_frequency,interaction_frequency,co_occurrence,similarity_score,name_similarity,description_severity,description_length,clinical_prior_drug1,clinical_prior_drug2,clinical_prior_mean
+Abacavir,Abemaciclib,Low Risk,0.9462422193549532,False,2026-05-05T13:25:14.454779,209.01020408163265,358.4896907216495,1.0,181.0,0.2937219730941704,0.5263157894736842,2.8,92.0,3.16089374683335,3.1608937468333496,3.1608937468333496
