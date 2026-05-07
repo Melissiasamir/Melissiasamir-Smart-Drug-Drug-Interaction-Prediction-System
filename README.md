@@ -31,7 +31,25 @@ The system is designed to demonstrate how modern ML pipelines are assembled for 
   - **User “Analyze Risk” path:** SMTP alert to `ALERT_TO` for any prediction that is **not** `Low Risk`, including SHAP/forecast context (`utils/alerts.py`, `app.py`).
 
 ---
+## 3a. Documentation Structure
 
+| Section | Focus |
+|---------|-------|
+| **1–2** | Project title & overview |
+| **3–3a** | Key features & documentation map |
+| **4–12** | Architecture, data pipeline, models, usage, installation |
+| **13** | **Self-Learning & Adaptive Learning System** (collection, augmentation, triggers) |
+| **14** | **Advanced Features & Integrations** (PyTorch GCN, RDKit, SHAP fallback) |
+| **15** | **Dual Dashboard Architecture** (User & Doctor tabs, features) |
+| **16** | **Email & Alert Systems** (two channels, SMTP config) |
+| **17** | **Structured Clinical Report Generation** (schema, workflow, JSON format) |
+| **18** | **Feature Engineering & Data Pipeline** (feature construction, sources) |
+| **19** | **Deployment & Configuration** (env vars, first-run, performance) |
+| **20** | **Testing & Validation** (self-learning tests, integration) |
+| **21** | **Project Structure** (complete directory layout) |
+| **22** | Disclaimer |
+
+---
 ## 4. System architecture
 
 The system is organized into four conceptual layers:
@@ -283,6 +301,348 @@ Exact strings and scores depend on data, model seeding, and the submitted pair.
 
 ---
 
-## 13. Disclaimer
+## 13. Self-Learning & Adaptive Learning System
+
+The system includes a comprehensive **self-learning module** (`utils/self_learning.py`) that continuously improves through data collection and augmentation:
+
+### Components
+
+| Component | Purpose |
+|-----------|---------|
+| **SelfLearningCollector** | Automatically captures predictions with drug names, scaled features, labels, and confidence scores after each inference. |
+| **Uncertainty Detection** | Flags predictions with confidence < 60% (configurable) for deeper analysis. |
+| **DataAugmentor** | Generates synthetic sample variations using Gaussian noise (default ±5% std) to augment training datasets. |
+| **Persistent Storage** | Automatically saves collected samples to `data/self_learning_samples.csv` across app sessions. |
+| **Learning Event Trigger** | When threshold of 20 samples collected (configurable), triggers safe non-destructive reclustering preview. |
+| **Non-Destructive Reclustering** | Runs alternative DBSCAN + FCM clustering on augmented dataset **without replacing** production SVM or artifacts. |
+
+### Integration with UI
+
+- **Self-Learning Status Dashboard** (User tab): Shows total samples collected, uncertain count, learning events triggered, and progress bar toward next trigger.
+- **Automatic Collection**: After every prediction, the engine collects inference outputs transparently.
+- **Persistence**: Samples automatically saved after each prediction; loaded on app restart.
+- **Testing Support**: `test_self_learning.py` validates collection, augmentation, learning triggers, and CSV persistence.
+
+### Key Methods
+
+```python
+# Initialize in app
+engine = SelfLearningEngine(config)
+
+# Collect prediction (automatic after infer_pair)
+engine.collect_prediction(
+    drug_a="Aspirin",
+    drug_b="Warfarin",
+    features=row_scaled,
+    prediction_label="High Risk",
+    confidence=0.75,
+    prediction_probabilities={"Low Risk": 0.1, "Medium Risk": 0.15, "High Risk": 0.75}
+)
+
+# Check and trigger learning
+if engine.should_trigger_learning():
+    df_augmented = engine.prepare_learning_dataset()
+    event = engine.trigger_learning_event()
+
+# Persist across sessions
+engine.persist_samples()
+engine.load_samples()
+```
+
+---
+
+## 14. Advanced Features & Optional Integrations
+
+### PyTorch / Torch Geometric GCN Embeddings
+
+- **Runtime Detection**: App auto-detects PyTorch and torch_geometric on startup.
+- **GCN Architecture**: Two GCNConv layers (hidden=64, output=32) over interaction graph if libraries available.
+- **Graceful Fallback**: Uses normalized 16-D feature vectors (name statistics: length, unique chars, ratios, vowel count, etc.) if PyTorch unavailable.
+- **Embedding Cache**: Embeddings persisted to `advanced_ai_pipeline/data/gnn_embedding_cache.pkl` for performance.
+
+### RDKit Cheminformatics
+
+- **SMILES Parsing**: Detects and parses SMILES strings in drug names to extract molecular descriptors.
+- **Molecular Features**: Computes molecular weight, logP, atom count when available.
+- **Graceful Fallback**: Uses text-only features if RDKit not installed.
+
+### SHAP vs. Sensitivity Fallback
+
+- **Primary**: KernelExplainer with 40-sample background for Shapley values.
+- **Fallback**: Deterministic local sensitivity analysis when SHAP unavailable.
+- **Output**: Feature importance bar charts and structured report explanations.
+
+---
+
+## 15. Dual Dashboard Architecture
+
+### User Dashboard Features
+
+| Feature | Description |
+|---------|-------------|
+| **Drug Pair Input** | Autocomplete-enabled text inputs for Drug A and Drug B. |
+| **Check Interaction Risk** | Main button triggering full pipeline inference. |
+| **Risk Visualization** | Color-coded badge (Low=green, Medium=yellow, High=red) with confidence %. |
+| **SHAP Feature Chart** | Top contributing features ranked by importance. |
+| **SARIMA Forecast Plot** | Actual vs. predicted dangerous cases with trend indicator. |
+| **Score Breakdown** | Transparent display of SVM, SHAP, Forecast, and Total scores (0-100). |
+| **Clinical Summary Report** | Plain-language explanation with "Why?", "What to do?", "Alternatives" sections. |
+| **Email Alerts** | Sidebar to capture user email + HIGH-risk alert status. |
+| **Analyze Risk Button** | Triggers analysis with optional SMTP alert to ALERT_TO recipient. |
+| **Self-Learning Status** | Progress metrics, uncertain samples, learning event count. |
+
+### Doctor Dashboard Features
+
+| Feature | Description |
+|---------|-------------|
+| **Excel Intake Form** | Input Drug 1, Drug 2, interaction description → save to `doctor_added_interactions.xlsx`. |
+| **Advanced AI Processing** | Full pipeline: drug embeddings, KMeans clustering, similarity search. |
+| **Similar Drug Recommendations** | Top-5 cosine-similar drugs per submitted drug displayed per cluster. |
+| **Doctor Drug Store** | JSON persistence (`doctor_drug_store.json`) of processed drugs, embeddings, cluster IDs. |
+| **Graph Update** | Rebuilds interaction graph to include doctor-submitted pairs. |
+| **Clinical Report Display** | Shows latest aggregated report from `last_clinical_report.json`. |
+
+---
+
+## 16. Email & Alert Systems (Dual Channels)
+
+### Channel 1: User Dashboard HIGH-Risk Email
+
+**Trigger**: Aggregated report `risk_level` is `HIGH`.
+
+- **User Email Storage**: Captured via UI input → persisted in `data/user_profile.json`.
+- **Email Content**: Subject + multi-section body (Why? Actions? Alternatives?).
+- **SMTP Config**: Loaded from `data/smtp_config.json` (gitignored). Fields: `host`, `port`, `user`, `password`, `from_email`.
+- **Gmail Support**: Explicit documentation for app-specific passwords.
+- **Validation**: Checks all required fields; returns clear error messages if misconfigured.
+
+**Example env variables:**
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+ALERT_FROM=your_email@gmail.com
+```
+
+### Channel 2: Analyze Risk Path Email
+
+**Trigger**: User runs "Analyze Risk" and prediction is NOT "Low Risk".
+
+- **Alert Recipient**: Configured via `ALERT_TO` env variable.
+- **Email Content**: Drug pair, risk level, confidence, total score, action items, explanation.
+- **Implementation**: `utils/alerts.py::send_email_alert`.
+
+**Example:**
+```
+ALERT_TO=alerts@medical-team.com
+DDI_SIMULATE_HIGH_RISK=1  # (testing only) force HIGH tier after real model
+```
+
+---
+
+## 17. Structured Clinical Report Generation
+
+**Location**: `advanced_ai_pipeline/reporting/report_generator.py`
+
+**Report Persistence**: `data/last_clinical_report.json`
+
+### JSON Schema
+
+```json
+{
+  "drug_1": "Aspirin",
+  "drug_2": "Ibuprofen",
+  "risk_level": "MEDIUM",
+  "svm_label": "Medium Risk",
+  "confidence": 0.72,
+  "total_score": 52.3,
+  "probabilities": {
+    "Low Risk": 0.08,
+    "Medium Risk": 0.72,
+    "High Risk": 0.20
+  },
+  "interpretation": "SVM risk tier: Medium Risk (mapped to MEDIUM). Forecast shows no increasing trend...",
+  "key_factors": [
+    "interaction_frequency (importance 0.0412)",
+    "clinical_prior_mean (importance 0.0298)"
+  ],
+  "trend": "Forecast does not show an increasing dangerous-case trend.",
+  "treatment_plan": [
+    "Review before use: confirm indications, monitor closely...",
+    "Reconcile the medication list...",
+    "Document decision in chart"
+  ],
+  "alternatives": ["Warfarin", "Clopidogrel"],
+  "recommended_action": "Review before use: ...",
+  "note": "This report aggregates automated signals..."
+}
+```
+
+### Report Workflow
+
+1. **Doctor submits pair** or **User runs "Analyze Risk"**.
+2. **Full pipeline runs**: SVM prediction → SHAP → SARIMA forecast → scoring.
+3. **`generate_report(context)` aggregates** all outputs into structured JSON.
+4. **Report persisted** to disk.
+5. **If HIGH risk + user email exists** → SMTP alert triggered.
+6. **Report displayed** in UI (User or Doctor dashboard).
+
+---
+
+## 18. Feature Engineering & Data Pipeline
+
+### Input Sources
+
+| Source | Path | Role |
+|--------|------|------|
+| Drug–drug interactions | `data/drug_drug_interactions.csv` | Pair-level interaction descriptions, frequency signals. |
+| Drug classification | `data/drug_classification.csv` | Patient/drug context (age, BP, cholesterol, Na/K) for clinical priors. |
+| Doctor interactions | `data/doctor_added_interactions.xlsx` | Clinician-submitted pairs integrated into graphs. |
+| User profile | `data/user_profile.json` | End-user email for HIGH-risk alerts. |
+| Self-learning samples | `data/self_learning_samples.csv` | Persisted uncertain predictions for augmentation. |
+
+### Feature Construction (`utils/feature_engineering.py`)
+
+- **Pair Frequency**: Total interactions per drug.
+- **Co-occurrence**: Specific pair count in dataset.
+- **Neighborhood Similarity**: Jaccard index of drug interaction partners.
+- **Clinical Keywords**: Severity score from description (toxicity=2.3, bleeding=2.4, etc.).
+- **Clinical Priors**: Risk weights from classification data (age, BP, cholesterol).
+- **Name Similarity**: SequenceMatcher-based text similarity.
+- **Fallback Logic**: For unseen pairs, uses medians/priors from partial drug presence.
+
+### Feature Matrix & Scaling
+
+- **All numeric features** normalized via `StandardScaler`.
+- **Categorical fields** (Sex, BP, Cholesterol) label-encoded.
+- **Scaler persisted** in pipeline artifacts for consistent inference-time scaling.
+
+---
+
+## 19. Deployment & Configuration
+
+### Environment Variables (Optional)
+
+```bash
+# SMTP for HIGH-risk user alerts
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+ALERT_FROM=your_email@gmail.com
+
+# Alert recipient for "Analyze Risk" path
+ALERT_TO=alerts@medical-team.com
+
+# Model tuning (must match saved artifacts)
+MAX_TRAIN_ROWS=4000
+
+# Testing only: force HIGH-risk tier
+DDI_SIMULATE_HIGH_RISK=1
+```
+
+### First Run Behavior
+
+1. On startup, `app.py` checks for `models/pipeline_artifacts.joblib`.
+2. If **missing or incompatible** (version/MAX_TRAIN_ROWS mismatch) → **full pipeline trains**.
+3. Training includes: data cleaning, feature engineering, DBSCAN/FCM pseudo-labels, SVM training, SARIMA fitting.
+4. Artifacts serialized; cached for subsequent runs.
+5. **Subsequent runs** load cached pipeline for ~2-5 second startup.
+
+### Performance Optimization
+
+- **Joblib Caching**: Production model loaded from disk artifact on every app run.
+- **Streamlit @st.cache_resource**: SelfLearningEngine, datasets, pipeline cached across widget interactions.
+- **Embedding Cache**: GNN embeddings pre-computed and cached to avoid recomputation.
+
+---
+
+## 20. Testing & Validation
+
+### Self-Learning Module Tests (`test_self_learning.py`)
+
+- **Smoke tests** for collection, uncertainty detection, augmentation, learning triggers.
+- **Synthetic dataset generation** for isolated testing.
+- **Persistence validation**: CSV save/load verified.
+- **Augmentation verification**: Confirms larger dataset with original features.
+- **Non-destructive verification**: Confirms production artifacts unchanged.
+
+### Integration Testing
+
+- **DDI_SIMULATE_HIGH_RISK=1**: Manually test HIGH-risk email path without real data.
+- **Manual doctor submission**: Submit via Doctor tab, verify report persisted and displayed.
+- **Manual email validation**: Configure SMTP, trigger Analyze Risk with non-Low Risk prediction.
+
+---
+
+## 21. Project Structure (Complete)
+
+```
+├── app.py                                  # Streamlit entrypoint (dual dashboards)
+├── requirements.txt                        # Dependencies (streamlit, pandas, sklearn, etc.)
+├── SELF_LEARNING_README.md                 # Extended self-learning documentation
+├── test_self_learning.py                   # Self-learning module tests
+├── models/
+│   └── pipeline_artifacts.joblib           # Cached training payload
+├── data/
+│   ├── drug_drug_interactions.csv          # Base DDI dataset
+│   ├── drug_classification.csv             # Patient/drug context
+│   ├── doctor_added_interactions.xlsx      # Doctor submissions (created at runtime)
+│   ├── user_profile.json                   # User email (created when saved)
+│   ├── last_clinical_report.json           # Latest report (created when generated)
+│   ├── self_learning_samples.csv           # Collected uncertain samples
+│   └── smtp_config.example.json            # SMTP config template
+├── utils/
+│   ├── data_loader.py                      # Load DDI + classification CSV
+│   ├── preprocessing.py                    # Clean, encode, normalize data
+│   ├── feature_engineering.py              # Build pair-level features
+│   ├── clustering.py                       # DBSCAN + FCM pseudo-labels
+│   ├── classifier.py                       # SVM train + predict_risk
+│   ├── pipeline.py                         # Main orchestration (train/load/infer)
+│   ├── explainability.py                   # SHAP + fallback sensitivity
+│   ├── forecasting.py                      # SARIMA daily risk series
+│   ├── scoring.py                          # Composite scoring system
+│   ├── alerts.py                           # SMTP alerts (Analyze Risk path)
+│   └── self_learning.py                    # Collection + augmentation + learning
+├── advanced_ai_pipeline/
+│   ├── pipeline.py                         # Doctor pipeline orchestration
+│   ├── api_handler.py                      # Thin API wrapper
+│   ├── run_pipeline.py                     # CLI runner (optional standalone)
+│   ├── doctor_pipeline/
+│   │   ├── __init__.py
+│   │   ├── doctor_handler.py               # Doctor submission processing
+│   │   ├── drug_processor.py               # Individual drug processing
+│   │   └── interaction_processor.py        # Interaction integration
+│   ├── gnn/
+│   │   ├── __init__.py
+│   │   ├── graph_builder.py                # Build interaction graph
+│   │   ├── features.py                     # Node feature generation
+│   │   ├── embedder.py                     # GCN or fallback embeddings
+│   │   └── model.py                        # GCN model definition
+│   ├── clustering/
+│   │   ├── __init__.py
+│   │   ├── embedding_cluster.py            # KMeans clustering + assignment
+│   │   └── cluster_assigner.py             # Map drugs to clusters
+│   ├── similarity/
+│   │   ├── __init__.py
+│   │   └── similarity_engine.py            # Cosine similarity search
+│   ├── data/
+│   │   ├── doctor_drug_store.json          # Processed drug persistence
+│   │   └── gnn_embedding_cache.pkl         # Cached embeddings
+│   └── reporting/
+│       ├── __init__.py
+│       ├── report_generator.py             # Aggregate + JSON report
+│       ├── integration.py                  # Doctor submission → report
+│       ├── user_profile.py                 # User email management
+│       ├── email_service.py                # HIGH-risk email (user channel)
+│       ├── smtp_client.py                  # SMTP send implementation
+│       └── user_display.py                 # UI rendering functions
+└── README.md                               # This file
+```
+
+---
+
+## 22. Disclaimer
 
 **This system is for research and educational purposes only.** It is not a medical device, not FDA-cleared or CE-marked software, and must not be used as the sole basis for prescribing, deprescribing, or changing patient care. Drug interaction risk is context-dependent (dose, organ function, genetics, comorbidities, and co-medications). Always consult qualified healthcare professionals and authoritative drug information resources before making clinical decisions.
