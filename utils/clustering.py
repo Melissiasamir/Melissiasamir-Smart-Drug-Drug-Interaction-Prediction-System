@@ -1,4 +1,4 @@
-"""# 5. Unsupervised Learning (Clustering)
+"""# 5.(clustring.py) Unsupervised Learning (Clustering)
 
 Important: DO NOT USE ORIGINAL LABELS. The source DDI data has interaction text
 but no supervised risk labels, so we generate pseudo-labels using DBSCAN + FCM.
@@ -18,31 +18,91 @@ from sklearn.neighbors import NearestNeighbors
 RISK_LABELS = np.array(["Low Risk", "Medium Risk", "High Risk"])
 
 
+def fuzzy_membership_for_row(
+    row_scaled: pd.DataFrame | np.ndarray,
+    clustering_metadata: dict[str, object],
+    m: float = 2.0,
+) -> dict[str, float]:
+    """Compute FCM membership for one inference row from saved FCM centers.
+
+    mu_ik = 1 / sum_j((||x-c_i|| / ||x-c_j||) ** (2/(m-1)))
+
+    The saved ``risk_map`` converts raw FCM cluster IDs to clinical labels, so
+    callers can directly read mu(predicted_label).
+    """
+    centers = np.asarray(clustering_metadata.get("fcm_centers"), dtype=float)
+    if centers.ndim != 2 or centers.size == 0:
+        return {str(label): 0.0 for label in RISK_LABELS}
+
+    values = row_scaled.to_numpy() if isinstance(row_scaled, pd.DataFrame) else np.asarray(row_scaled)
+    x = np.asarray(values, dtype=float).reshape(1, -1)
+    distances = np.linalg.norm(x[:, None, :] - centers[None, :, :], axis=2).reshape(-1)
+    distances = np.maximum(distances, 1e-12)
+    inv = distances ** (-2 / (m - 1))
+    raw_membership = inv / np.maximum(inv.sum(), 1e-12)
+
+    risk_map = clustering_metadata.get("risk_map") or {}
+    by_label: dict[str, float] = {str(label): 0.0 for label in RISK_LABELS}
+    for cluster_id, membership_value in enumerate(raw_membership):
+        label = risk_map.get(cluster_id, risk_map.get(str(cluster_id), str(cluster_id)))
+        by_label[str(label)] = float(membership_value)
+
+    return by_label
+
+
 def tune_dbscan(scaled_features: pd.DataFrame) -> DBSCAN:
     """Tune DBSCAN eps/min_samples without using labels."""
+    
     n_samples = len(scaled_features)
+
     min_samples_grid = [4, 6, 8, 10]
+
     best_model = None
     best_score = -np.inf
 
     for min_samples in min_samples_grid:
+
         k = min(min_samples, max(2, n_samples - 1))
-        distances, _ = NearestNeighbors(n_neighbors=k).fit(scaled_features).kneighbors(scaled_features)
-        candidates = np.quantile(distances[:, -1], [0.55, 0.65, 0.75, 0.85, 0.95])
+
+        distances, _ = (
+            NearestNeighbors(n_neighbors=k)
+            .fit(scaled_features)
+            .kneighbors(scaled_features)
+        )
+
+        candidates = np.quantile(
+            distances[:, -1],
+            [0.55, 0.65, 0.75, 0.85, 0.95],
+        )
+
         for eps in candidates:
-            model = DBSCAN(eps=float(eps), min_samples=min_samples)
+
+            safe_eps = max(float(eps), 0.1)
+
+            model = DBSCAN(
+                eps=safe_eps,
+                min_samples=min_samples,
+            )
+
             labels = model.fit_predict(scaled_features)
+
             clusters = set(labels) - {-1}
+
             noise_ratio = float(np.mean(labels == -1))
+
             if len(clusters) < 2 or noise_ratio > 0.7:
                 score = -noise_ratio
             else:
-                score = silhouette_score(scaled_features, labels) - (0.25 * noise_ratio)
+                score = (
+                    silhouette_score(scaled_features, labels)
+                    - (0.25 * noise_ratio)
+                )
+
             if score > best_score:
                 best_score = score
                 best_model = model
 
-    return best_model or DBSCAN(eps=0.8, min_samples=6).fit(scaled_features)
+    return best_model or DBSCAN(eps=0.8,min_samples=6,).fit(scaled_features)
 
 
 def fuzzy_c_means(

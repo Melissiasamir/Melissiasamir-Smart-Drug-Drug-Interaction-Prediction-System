@@ -1,4 +1,4 @@
-"""# 7. Explainability (SHAP)
+"""# 7. (explainability.py) Explainability (SHAP)
 
 SHAP is used for interpretability because it attributes a prediction back to
 individual feature contributions. This is essential in healthcare-adjacent AI:

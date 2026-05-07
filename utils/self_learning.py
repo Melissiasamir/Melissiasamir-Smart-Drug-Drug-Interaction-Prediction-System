@@ -52,6 +52,10 @@ class SelfLearningCollector:
         prediction_label: str,
         confidence: float,
         prediction_probabilities: dict[str, float],
+        svm_gap: float | None = None,
+        fuzzy_membership: float | None = None,
+        agentic_score: float | None = None,
+        action_route: str | None = None,
     ) -> dict[str, object]:
         """Collect a feature row and prediction metadata from one inference."""
         feature_names = None
@@ -70,6 +74,10 @@ class SelfLearningCollector:
             "prediction_label": prediction_label,
             "confidence": float(confidence),
             "probabilities": prediction_probabilities,
+            "svm_gap": svm_gap,
+            "fuzzy_membership": fuzzy_membership,
+            "agentic_score": agentic_score,
+            "action_route": action_route,
             "features": feature_values.astype(float),
             "feature_names": feature_names,
             "feature_count": len(feature_values),
@@ -167,6 +175,10 @@ class SelfLearningEngine:
         prediction_label: str,
         confidence: float,
         prediction_probabilities: dict[str, float],
+        svm_gap: float | None = None,
+        fuzzy_membership: float | None = None,
+        agentic_score: float | None = None,
+        action_route: str | None = None,
     ) -> None:
         """Record a prediction for future self-learning."""
         self.collector.collect_sample(
@@ -176,6 +188,10 @@ class SelfLearningEngine:
             prediction_label=prediction_label,
             confidence=confidence,
             prediction_probabilities=prediction_probabilities,
+            svm_gap=svm_gap,
+            fuzzy_membership=fuzzy_membership,
+            agentic_score=agentic_score,
+            action_route=action_route,
         )
 
     def should_trigger_learning(self) -> bool:
@@ -232,6 +248,8 @@ class SelfLearningEngine:
         scaler=None,
         feature_columns: list[str] | None = None,
         run_reclustering_preview: bool = False,
+        baseline_clustering_metadata: dict | None = None,
+        baseline_svm_gap: float | None = None,
     ) -> dict[str, object]:
         """Trigger learning metadata and optionally a non-destructive reclustering preview."""
         status = self.collector.get_collection_status()
@@ -246,6 +264,7 @@ class SelfLearningEngine:
         learning_df = self.prepare_learning_dataset()
         reclustering_metadata = None
         pseudo_label_counts = None
+        drift_decision = None
 
         if run_reclustering_preview and learning_df is not None and scaler is not None and feature_columns:
             from utils.clustering import generate_pseudo_labels
@@ -269,6 +288,20 @@ class SelfLearningEngine:
                         original_features,
                     )
                     pseudo_label_counts = pseudo_labels["pseudo_label"].value_counts().to_dict()
+                    if baseline_clustering_metadata is not None:
+                        from utils.drift_detection import evaluate_self_learning_drift
+
+                        recent_gaps = [
+                            float(sample["svm_gap"])
+                            for sample in self.collector.collected_samples
+                            if sample.get("svm_gap") is not None
+                        ]
+                        drift_decision = evaluate_self_learning_drift(
+                            baseline_gap=baseline_svm_gap,
+                            recent_gaps=recent_gaps,
+                            old_clustering_metadata=baseline_clustering_metadata,
+                            new_clustering_metadata=reclustering_metadata,
+                        )
                 else:
                     logger.warning("Skipped reclustering preview because fewer than 3 complete rows are available")
 
@@ -281,6 +314,7 @@ class SelfLearningEngine:
             "reclustering_preview_ran": reclustering_metadata is not None,
             "reclustering_metadata": reclustering_metadata,
             "pseudo_label_counts": pseudo_label_counts,
+            "drift_decision": drift_decision,
             "status": status,
             "learning_df": learning_df,
         }
@@ -323,6 +357,10 @@ class SelfLearningEngine:
                     "prediction_label": sample["prediction_label"],
                     "confidence": sample["confidence"],
                     "is_uncertain": sample["is_uncertain"],
+                    "svm_gap": sample.get("svm_gap"),
+                    "fuzzy_membership": sample.get("fuzzy_membership"),
+                    "agentic_score": sample.get("agentic_score"),
+                    "action_route": sample.get("action_route"),
                     "timestamp": sample["timestamp"],
                 }
                 feature_names = sample.get("feature_names") or [
@@ -333,7 +371,17 @@ class SelfLearningEngine:
 
                 save_data.append(record)
 
-            pd.DataFrame(save_data).to_csv(filepath, mode="a", header=not filepath.exists(), index=False)
+            new_df = pd.DataFrame(save_data)
+            if filepath.exists():
+                existing_columns = list(pd.read_csv(filepath, nrows=0).columns)
+                if existing_columns != list(new_df.columns):
+                    existing_df = pd.read_csv(filepath)
+                    combined = pd.concat([existing_df, new_df], ignore_index=True, sort=False)
+                    combined.to_csv(filepath, index=False)
+                else:
+                    new_df.to_csv(filepath, mode="a", header=False, index=False)
+            else:
+                new_df.to_csv(filepath, index=False)
             self.collector._persisted_sample_count = len(self.collector.collected_samples)
 
             if self.config.log_actions:
@@ -360,6 +408,10 @@ class SelfLearningEngine:
                 "confidence",
                 "is_uncertain",
                 "timestamp",
+                "svm_gap",
+                "fuzzy_membership",
+                "agentic_score",
+                "action_route",
             }
             feature_cols = [col for col in df.columns if col not in metadata_cols]
 
@@ -371,6 +423,10 @@ class SelfLearningEngine:
                     "prediction_label": row["prediction_label"],
                     "confidence": float(row["confidence"]),
                     "probabilities": {},
+                    "svm_gap": None if pd.isna(row.get("svm_gap")) else float(row.get("svm_gap")),
+                    "fuzzy_membership": None if pd.isna(row.get("fuzzy_membership")) else float(row.get("fuzzy_membership")),
+                    "agentic_score": None if pd.isna(row.get("agentic_score")) else float(row.get("agentic_score")),
+                    "action_route": None if pd.isna(row.get("action_route")) else str(row.get("action_route")),
                     "features": features,
                     "feature_names": feature_cols,
                     "feature_count": len(features),
@@ -403,4 +459,17 @@ class SelfLearningEngine:
             "confidence_threshold": self.config.uncertainty_confidence_threshold,
             "session_active_since": self.collector.session_start_time.isoformat(),
             "learning_history_count": len(self.learning_history),
+            "recent_mean_svm_gap": self._recent_mean("svm_gap"),
+            "recent_mean_agentic_score": self._recent_mean("agentic_score"),
+            "latest_action_route": self.collector.collected_samples[-1].get("action_route")
+            if self.collector.collected_samples
+            else None,
         }
+
+    def _recent_mean(self, key: str, window: int = 20) -> float | None:
+        values = [
+            float(sample[key])
+            for sample in self.collector.collected_samples[-window:]
+            if sample.get(key) is not None
+        ]
+        return float(np.mean(values)) if values else None

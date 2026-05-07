@@ -12,9 +12,7 @@ import pandas as pd
 
 from advanced_ai_pipeline.doctor_pipeline.doctor_handler import DoctorPipeline
 
-from utils.explainability import compute_shap_importance
 from utils.pipeline import infer_pair, load_or_train_pipeline
-from utils.scoring import compute_scores
 
 from .email_service import send_email
 from .report_generator import generate_report
@@ -116,19 +114,9 @@ def process_doctor_submission(drug_1: str, drug_2: str, description: str) -> dic
     force_high = os.environ.get("DDI_SIMULATE_HIGH_RISK", "").strip() == "1"
 
     artifacts = load_or_train_pipeline()
-    _, row_scaled, prediction = infer_pair(artifacts, drug_1, drug_2)
-    shap_importance = compute_shap_importance(
-        artifacts.classifier.model,
-        artifacts.scaled_features,
-        row_scaled,
-        artifacts.feature_columns,
-    )
-    scores = compute_scores(
-        float(prediction["confidence"]),
-        shap_importance,
-        bool(artifacts.forecast_increasing),
-        str(prediction["label"]),
-    )
+    _, _, prediction = infer_pair(artifacts, drug_1, drug_2)
+    shap_importance = prediction["shap_importance"]
+    scores = prediction["scores"]
     advanced = _advanced_ai_snapshot(drug_1, drug_2)
 
     context = build_context(

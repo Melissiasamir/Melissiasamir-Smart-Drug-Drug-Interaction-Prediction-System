@@ -30,11 +30,10 @@ from advanced_ai_pipeline.reporting.user_display import (
 )
 from advanced_ai_pipeline.reporting.user_profile import get_user_email
 from utils.data_loader import dataset_description, load_datasets
-from utils.explainability import compute_shap_importance, shap_plot
+from utils.explainability import shap_plot
 from utils.forecasting import forecast_plot
 from utils.pipeline import infer_pair, load_or_train_pipeline
 from utils.preprocessing import clean_ddi_data
-from utils.scoring import compute_scores
 from utils.self_learning import SelfLearningEngine, SelfLearningConfig
 
 
@@ -483,10 +482,9 @@ st.markdown(
 )
 
 
-@st.cache_resource(show_spinner="Loading saved AI pipeline, or training once if no saved model exists...")
+@st.cache_resource(show_spinner=False)
 def get_artifacts():
     return load_or_train_pipeline()
-
 
 @st.cache_data(show_spinner=False)
 def get_drug_options() -> list[str]:
@@ -844,12 +842,23 @@ else:
         "warning",
     )
 
+
 if run:
-    artifacts = get_artifacts()
+    if "artifacts" not in st.session_state:
+        with st.spinner("Initializing AI system..."):
+            st.session_state.artifacts = get_artifacts()
+
+    artifacts = st.session_state.artifacts    
     row, row_scaled, prediction = infer_pair(artifacts, drug_a, drug_b)
-    
-    # 🧠 Self-Learning: Collect prediction for model improvement
+
+    shap_importance = prediction["shap_importance"]
+    shap_reliability = prediction["shap_reliability"]
+    scores = prediction["scores"]
+    react_decision = prediction["react_decision"]
+    rag_result = prediction["rag_result"]
+
     self_learning_engine = get_self_learning_engine()
+
     self_learning_engine.collect_prediction(
         drug_a=drug_a,
         drug_b=drug_b,
@@ -857,25 +866,15 @@ if run:
         prediction_label=prediction["label"],
         confidence=prediction["confidence"],
         prediction_probabilities=prediction["probabilities"],
+        svm_gap=prediction.get("svm_gap"),
+        fuzzy_membership=prediction.get("fuzzy_membership"),
+        agentic_score=scores["final_agentic_score"],
+        action_route=react_decision["route"],
     )
-    
-    shap_importance = compute_shap_importance(
-        artifacts.classifier.model,
-        artifacts.scaled_features,
-        row_scaled,
-        artifacts.feature_columns,
-    )
-    scores = compute_scores(
-        prediction["confidence"],
-        shap_importance,
-        artifacts.forecast_increasing,
-        prediction["label"],
-    )
-
     pair_report = build_pair_report(drug_a, drug_b, artifacts, prediction, shap_importance, scores)
     st.session_state["pair_report_last"] = pair_report
 
-    action = recommended_action(prediction["label"], artifacts.forecast_increasing)
+    action = f"Agent route: {react_decision['route']}. {recommended_action(prediction['label'], artifacts.forecast_increasing)}"
     email_notify_result: dict[str, str] | None = None
     if pair_report.get("risk_level") == "HIGH":
         user_mail = get_user_email()
@@ -956,6 +955,48 @@ if run:
         width="stretch",
     )
 
+    render_html('<div class="section-title">Cluster Health</div>')
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("DBSCAN Outliers", artifacts.clustering_metadata.get("dbscan_outlier_count", 0))
+    with c2:
+        st.metric("mu(predicted)", f"{prediction.get('fuzzy_membership', 0.0):.2%}")
+    with c3:
+        st.metric("Baseline SVM Gap", f"{artifacts.baseline_svm_gap:.3f}")
+
+    render_html('<div class="section-title">SHAP Reliability</div>')
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.metric("Cosine Similarity", f"{shap_reliability['cosine_similarity']:.3f}")
+    with s2:
+        st.metric("Reliability Signal", f"{scores['shap_reliability_signal']:.2%}")
+    with s3:
+        st.metric("Reliability Level", shap_reliability.get("reliability_level", "low").title())
+    with s4:
+        st.metric("Matched Memory", shap_reliability.get("matched_cluster") or "Unavailable")
+
+    render_html('<div class="section-title">Action Dispatch</div>')
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        st.metric("Route", react_decision["route"])
+    with d2:
+        st.metric("RAG Vote", rag_result.get("vote", {}).get("status", "not_requested"))
+    with d3:
+        st.metric("Action Confidence", f"{react_decision.get('action_confidence', 0.0):.2%}")
+    with d4:
+        st.metric("Review Required", "Yes" if react_decision["human_review_required"] else "No")
+    with st.expander("ReAct trace", expanded=False):
+        st.dataframe(pd.DataFrame(react_decision["trace"]), width="stretch")
+
+    render_html('<div class="section-title">Outcome Tracking</div>')
+    o1, o2, o3 = st.columns(3)
+    with o1:
+        st.metric("Retrieved Cases", len(rag_result.get("cases", [])))
+    with o2:
+        st.metric("RAG Majority", rag_result.get("vote", {}).get("majority_label") or "None")
+    with o3:
+        st.metric("RAG Confidence", f"{rag_result.get('vote', {}).get('vote_confidence', 0.0):.2%}")
+
     render_html('<div class="section-title">🚨 Email alert status</div>')
     render_html(f"<div class='section-subtitle'>{action}</div>")
     if email_notify_result is None:
@@ -978,6 +1019,18 @@ if run:
         st.write(
             f"Forecast error = {artifacts.forecast_error:.3f}; threshold = {artifacts.clustering_metadata['forecast_error_threshold']:.3f}."
         )
+
+    render_html('<div class="section-title">Drift Alerts</div>')
+    drift_status = artifacts.drift_status or {}
+    drift_cols = st.columns(3)
+    with drift_cols[0]:
+        st.metric("Retrain Gate", "Open" if drift_status.get("triggered") else "Closed")
+    with drift_cols[1]:
+        st.metric("Gap Drop", f"{drift_status.get('svm_gap_signal', {}).get('drop', 0.0):.3f}")
+    with drift_cols[2]:
+        st.metric("Centroid Drift", f"{drift_status.get('centroid_signal', {}).get('centroid_drift', 0.0):.3f}")
+    with st.expander("Rollback protection", expanded=False):
+        st.write(drift_status.get("rollback_protection", "Rollback protection is available during model promotion."))
 
     # 🧠 Self-Learning Dashboard Section
     render_html('<div class="section-title">🧠 Self-Learning Status</div>')
@@ -1024,6 +1077,9 @@ if run:
         with col_detail2:
             st.write("**Learning History:**")
             st.write(f"- Total learning events: {learning_status['learning_history_count']}")
+            st.write(f"- Recent mean SVM gap: {learning_status['recent_mean_svm_gap']}")
+            st.write(f"- Recent mean agentic score: {learning_status['recent_mean_agentic_score']}")
+            st.write(f"- Latest action route: {learning_status['latest_action_route']}")
             st.write("- Uncertain samples are automatically augmented 3x")
             st.write("- Original data + augmentations enable safe reclustering")
 
@@ -1032,13 +1088,24 @@ if run:
             scaler=artifacts.scaler,
             feature_columns=artifacts.feature_columns,
             run_reclustering_preview=True,
+            baseline_clustering_metadata=artifacts.clustering_metadata,
+            baseline_svm_gap=artifacts.baseline_svm_gap,
         )
         if learning_event["triggered"] and learning_event["reclustering_preview_ran"]:
             with st.expander("Latest self-learning reclustering preview", expanded=False):
                 st.write("DBSCAN + FCM was re-run on collected/augmented samples only.")
                 st.write("The production SVM and saved pipeline artifacts were not overwritten.")
                 st.write(learning_event["pseudo_label_counts"])
-    
+                drift_preview = learning_event.get("drift_decision", {})
+
+                st.json(
+                    {
+                        "triggered": drift_preview.get("triggered"),
+                        "reason": drift_preview.get("reason"),
+                        "rollback_protection": drift_preview.get("rollback_protection"),
+                    }
+                )    
+                
     # Auto-persist collected samples (optional, can be disabled in config)
     self_learning_engine.persist_samples()
 

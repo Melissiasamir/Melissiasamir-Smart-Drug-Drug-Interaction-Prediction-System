@@ -22,10 +22,14 @@ The system is designed to demonstrate how modern ML pipelines are assembled for 
 - **Clustering (DBSCAN + Fuzzy C-Means)** — Density-based structure discovery plus soft clustering to map points into **Low / Medium / High Risk** pseudo-labels for supervised training (`utils/clustering.py`).
 - **SHAP explainability** — Kernel SHAP (or a deterministic sensitivity fallback) to attribute predictions to input features (`utils/explainability.py`).
 - **SARIMA forecasting** — `statsmodels` SARIMAX on a daily dangerous-case series; trend used for scoring, alerts, and dynamic reclustering decisions (`utils/forecasting.py`).
+- **Agentic composite scoring** — Five independent signals are combined into one normalized score: class severity, SVM probability gap, FCM membership, SHAP-memory reliability, and ARIMA/SARIMA trend (`utils/scoring.py`).
+- **Persistent SHAP memory** — Offline training stores cluster mean SHAP vectors in `models/shap_cluster_memory.joblib`; inference compares new SHAP vectors with cluster memories by cosine similarity (`utils/shap_memory.py`).
+- **Borderline RAG retrieval** — Lightweight `NearestNeighbors` retrieval over feature + SHAP vectors retrieves similar historical cases only when the ReAct loop needs evidence (`utils/rag_retrieval.py`).
+- **ReAct decision engine** — A transparent Observe → Reason → Act → Observe loop routes each prediction to direct dispatch, SHAP re-check, RAG retrieval, human review, tie handling, no-evidence handling, or low-score rejection (`utils/react_engine.py`).
 - **Graph-based drug context** — Interaction pairs are modeled as an undirected graph (`advanced_ai_pipeline/gnn/graph_builder.py`); optional **GCN-style** embeddings when **PyTorch** and **PyTorch Geometric** are installed, otherwise normalized feature-vector embeddings (`advanced_ai_pipeline/gnn/embedder.py`, `model.py`).
 - **Embedding clustering & similarity (advanced path)** — `KMeans` over drug embeddings where enough points exist; cosine similarity ranking for alternative drugs (`advanced_ai_pipeline/clustering/embedding_cluster.py`, `similarity/similarity_engine.py`).
-- **Dynamic / self-learning behavior** — Collects uncertain inferences, augments samples, and can run a **non-destructive DBSCAN + FCM preview** without overwriting the saved production SVM or `pipeline_artifacts.joblib` (`utils/self_learning.py`, surfaced in `app.py`).
-- **AI reporting system** — After a doctor saves a reviewed interaction, the pipeline aggregates SVM output, SHAP, forecast direction, production clustering metadata, and advanced similarity into a **structured JSON report** persisted under `data/last_clinical_report.json` (`advanced_ai_pipeline/reporting/`).
+- **Dynamic / self-learning behavior** — Collects uncertain inferences plus agentic metadata, augments samples, can run a **non-destructive DBSCAN + FCM preview**, and evaluates drift using both SVM-gap degradation and centroid movement (`utils/self_learning.py`, `utils/drift_detection.py`, surfaced in `app.py`).
+- **AI reporting system** — After a doctor saves a reviewed interaction, the pipeline aggregates SVM output, SHAP, five-signal score, SHAP reliability, ReAct decision, forecast direction, production clustering metadata, and advanced similarity into a **structured JSON report** persisted under `data/last_clinical_report.json` (`advanced_ai_pipeline/reporting/`).
 - **Email alert systems (two channels)**  
   - **User dashboard HIGH-risk path:** SMTP email to the address stored in `data/user_profile.json` when the aggregated report tier is `HIGH` (`advanced_ai_pipeline/reporting/email_service.py`).  
   - **User “Analyze Risk” path:** SMTP alert to `ALERT_TO` for any prediction that is **not** `Low Risk`, including SHAP/forecast context (`utils/alerts.py`, `app.py`).
@@ -49,6 +53,8 @@ The system is designed to demonstrate how modern ML pipelines are assembled for 
 | **21** | **Project Structure** (complete directory layout) |
 | **22** | Disclaimer |
 
+Agentic AI additions are documented across Sections **4-6**, **11**, **13**, **15**, **19**, and **21** because they are integrated into the existing pipeline rather than implemented as a separate redesign.
+
 ---
 ## 4. System architecture
 
@@ -58,7 +64,7 @@ The system is organized into four conceptual layers:
 |--------|----------------|
 | **ML layer** | Data loading, cleaning, feature construction, scaling, pseudo-label generation, SVM training/inference, SARIMA training, artifact persistence (`utils/`, `models/pipeline_artifacts.joblib`). |
 | **AI / embedding layer** | Graph construction from DDI (+ doctor Excel), name-based feature extraction, GNN or fallback embeddings, embedding clustering, cosine similarity (`advanced_ai_pipeline/gnn/`, `clustering/`, `similarity/`, `doctor_pipeline/`). |
-| **Decision / reporting layer** | Composite scoring, SHAP tables, report `generate_report(context)`, persistence, conditional user email (`utils/scoring.py`, `advanced_ai_pipeline/reporting/`). |
+| **Decision / reporting layer** | Agentic composite scoring, SHAP memory reliability, borderline RAG retrieval, ReAct action dispatch, report `generate_report(context)`, persistence, conditional user email (`utils/scoring.py`, `utils/shap_memory.py`, `utils/rag_retrieval.py`, `utils/react_engine.py`, `advanced_ai_pipeline/reporting/`). |
 | **User interface** | Streamlit dual-dashboard: **User** (pair analysis, charts, self-learning, clinical report panel, email capture) and **Doctor** (Excel-backed interaction intake) (`app.py`). |
 
 ### End-to-end flow (conceptual)
@@ -70,16 +76,18 @@ Input (drug pair + datasets)
     → Daily risk series → SARIMA → forecast error & trend
     → [Optional dynamic reclustering if forecast error high]
     → Inference: scaled features → SVM probabilities & label
-    → SHAP (or fallback) + composite scores
-    → UI: metrics, plots, alerts, self-learning status
+    → SHAP (or fallback) + SHAP memory reliability
+    → FCM membership + five-signal agentic score
+    → Borderline RAG retrieval + ReAct action dispatch
+    → UI: metrics, plots, alerts, self-learning status, drift monitoring
 
 Doctor path (additional):
     → Save row to doctor_added_interactions.xlsx
-    → Reporting integration: infer_pair + SHAP + scores + advanced snapshot
+    → Reporting integration: infer_pair + agentic decision + advanced snapshot
     → generate_report → persist JSON → optional HIGH-risk email to user
 
 User “Analyze Risk” path (additional):
-    → Same infer_pair / SHAP / forecast / scoring loop in-session
+    → Same infer_pair agentic decision loop in-session
     → Optional SMTP alert to ALERT_TO when risk ≠ Low Risk
 ```
 
@@ -99,6 +107,59 @@ The classifier is a **probability-calibrated RBF SVM** (`sklearn.svm.SVC` inside
 
 A daily series of **rolling dangerous-case counts** is built from pseudo-labeled high-risk rows with synthetic dates spanning 180 days (`create_daily_risk_series`). **SARIMAX** with order `(1,1,1)` and weekly seasonality `(1,1,1,7)` fits the series; a rolling mean fallback exists if fitting fails (`utils/forecasting.py`). The forecast is compared to recent actuals to set an **increasing / not increasing** flag.
 
+### Agentic scoring, memory, retrieval, and action dispatch
+
+The current inference path centralizes the agentic decision inside `infer_pair` (`utils/pipeline.py`) while preserving the original return shape: `(row, row_scaled, prediction)`. New outputs are attached to the `prediction` dictionary under `agentic_decision`, plus convenience keys such as `scores`, `shap_reliability`, `rag_result`, `react_decision`, and `final_decision`.
+
+**Integration order:**
+
+```
+prediction
+  -> SHAP explanation
+  -> SHAP reliability lookup
+  -> fuzzy membership lookup
+  -> intelligent scoring
+  -> RAG retrieval for borderline/uncertain cases
+  -> ReAct reasoning loop
+  -> final decision object
+```
+
+**Five-signal score (`utils/scoring.py`):**
+
+```
+final_agentic_score = 100 * (
+    0.30 * class_severity
+  + 0.20 * svm_probability_gap
+  + 0.20 * fuzzy_membership_of_predicted_class
+  + 0.15 * shap_memory_reliability
+  + 0.15 * arima_trend_signal
+)
+```
+
+Backward-compatible score keys are still returned: `total_score`, `svm_score`, `shap_score`, and `forecast_score`.
+
+**Persistent SHAP memory (`utils/shap_memory.py`):**
+
+- During training, representative SHAP vectors are grouped by pseudo-label/cluster.
+- Cluster mean SHAP vectors are persisted to `models/shap_cluster_memory.joblib`.
+- During inference, the current SHAP vector is compared with cluster means using cosine similarity.
+- Reliability is exposed as both a numeric signal and a dashboard-friendly level: `high`, `medium`, or `low`.
+
+**Borderline RAG retrieval (`utils/rag_retrieval.py`):**
+
+- Uses `sklearn.neighbors.NearestNeighbors`.
+- Stores retrieval vectors as `[scaled_feature_vector, shap_vector]`.
+- Persists the local index to `models/rag_case_index.joblib`.
+- Filters weak neighbors using a configurable minimum similarity threshold before majority voting.
+- Detects `tie`, `no_evidence`, and `low_confidence` outcomes.
+
+**ReAct engine (`utils/react_engine.py`):**
+
+- Uses an auditable Observe -> Reason -> Act -> Observe trace.
+- Routes dynamically using final score, dominant SHAP feature, RAG vote, ARIMA signal, and reliability score.
+- Supported routes: `direct_dispatch`, `shap_recheck`, `rag_retrieval`, `human_review`, `tie_handling`, `no_evidence_handling`, and `low_score_rejection`.
+- Returns `action_confidence`, `decision_explanation`, `trace`, and `final_decision`.
+
 ### Clustering (pattern discovery)
 
 1. **Production pipeline:** tuned **DBSCAN** on scaled pair features, then **Fuzzy C-Means** membership to derive soft risk pseudo-labels (`utils/clustering.py`).  
@@ -110,7 +171,7 @@ If `torch` and `torch_geometric` import successfully, `DrugGNN` uses two **GCNCo
 
 ### LLM
 
-**Not used** in this codebase. There is no large-language-model API integration.
+**Not used** in this codebase. There is no large-language-model API integration. The ReAct engine is a deterministic, auditable reasoning controller over local model signals; it does not call an external LLM.
 
 ---
 
@@ -125,6 +186,8 @@ If `torch` and `torch_geometric` import successfully, `DrugGNN` uses two **GCNCo
 | Doctor-reviewed interactions | `data/doctor_added_interactions.xlsx` | Optional extra pairs merged into graph building for the advanced pipeline (`InteractionProcessor`). |
 | User email (optional) | `data/user_profile.json` | Stores the end-user email for HIGH-tier report alerts. |
 | Self-learning buffer (optional) | `data/self_learning_samples.csv` | Persisted uncertain/low-confidence samples for the self-learning engine. |
+| SHAP memory artifact | `models/shap_cluster_memory.joblib` | Persisted cluster mean SHAP vectors and reliability thresholds. |
+| RAG case index | `models/rag_case_index.joblib` | Persisted nearest-neighbor index over feature + SHAP vectors. |
 
 ### Feature processing
 
@@ -135,17 +198,18 @@ If `torch` and `torch_geometric` import successfully, `DrugGNN` uses two **GCNCo
 1. Clean DDI + classification tables (`utils/preprocessing.py`).  
 2. Build and scale feature matrix; optional row cap via `MAX_TRAIN_ROWS` (default `4000`, `utils/pipeline.py`).  
 3. `generate_pseudo_labels` → train SVM → build risk series → SARIMA → evaluate forecast error → optional second clustering + SVM pass.  
-4. Serialize `PipelineArtifacts` to `models/pipeline_artifacts.joblib` (versioned payload with cache metadata).
+4. Build persistent SHAP cluster memory and the lightweight RAG case index for agentic inference.  
+5. Serialize `PipelineArtifacts` to `models/pipeline_artifacts.joblib` (versioned payload with cache metadata).
 
 ---
 
 ## 7. User flow
 
 1. **Launch** the Streamlit app and choose **User Dashboard** or **Dr Dashboard**.  
-2. **Doctor dashboard:** enter Drug 1, Drug 2, and an interaction description → submit → row appended to `doctor_added_interactions.xlsx`. The app then runs **`process_doctor_submission`** (reporting integration): SVM/SHAP/scores on that pair, advanced graph/embedding snapshot, structured report saved to `data/last_clinical_report.json`.  
+2. **Doctor dashboard:** enter Drug 1, Drug 2, and an interaction description → submit → row appended to `doctor_added_interactions.xlsx`. The app then runs **`process_doctor_submission`** (reporting integration): `infer_pair` agentic decision on that pair, advanced graph/embedding snapshot, structured report saved to `data/last_clinical_report.json`.  
 3. **User dashboard:** optional **Enter your email** + **Save** (validated, persisted). The **Clinical summary report** section loads the latest report from session state or disk after a doctor submission.  
 4. **Email (reporting path):** if the report’s `risk_level` is **`HIGH`** and a user email exists, **`send_email`** sends an SMTP message (requires `SMTP_*` and `ALERT_FROM`). For integration testing only, `DDI_SIMULATE_HIGH_RISK=1` forces the report tier to HIGH after the real model run.  
-5. **User “Analyze Risk”:** select Drug A / Drug B (or custom names) → **Analyze Risk** runs the main pipeline visualization (probabilities, SHAP chart, forecast chart, scores, alert status, self-learning). Non–Low Risk predictions can trigger **`send_email_alert`** to **`ALERT_TO`** when SMTP variables are set.
+5. **User “Analyze Risk”:** select Drug A / Drug B (or custom names) → **Analyze Risk** runs the main agentic inference visualization (probabilities, SHAP chart, forecast chart, five-signal score, SHAP reliability, ReAct route, RAG outcome, drift alerts, self-learning). Non–Low Risk predictions can trigger **`send_email_alert`** to **`ALERT_TO`** when SMTP variables are set.
 
 ---
 
@@ -221,7 +285,11 @@ On first run (or if `models/pipeline_artifacts.joblib` is missing or incompatibl
 │   ├── pipeline.py               # train/load/infer_pair
 │   ├── explainability.py         # SHAP + plots
 │   ├── forecasting.py            # SARIMA + plots
-│   ├── scoring.py
+│   ├── scoring.py                # Five-signal agentic composite score
+│   ├── shap_memory.py            # Persistent cluster SHAP memory
+│   ├── rag_retrieval.py          # Lightweight NearestNeighbors RAG retrieval
+│   ├── react_engine.py           # Observe-Reason-Act decision loop
+│   ├── drift_detection.py        # Gap + centroid drift gates and rollback helpers
 │   ├── alerts.py                 # SMTP alerts (ALERT_TO)
 │   └── self_learning.py          # Collection + preview reclustering
 ├── advanced_ai_pipeline/
@@ -254,6 +322,19 @@ After `infer_pair`, the UI and internal dicts expose values shaped like:
     "Low Risk": 0.08,
     "Medium Risk": 0.72,
     "High Risk": 0.20
+  },
+  "svm_gap": 0.52,
+  "fuzzy_membership": 0.68,
+  "scores": {
+    "final_agentic_score": 59.4,
+    "total_score": 59.4,
+    "forecast_score": 83.3
+  },
+  "final_decision": {
+    "route": "rag_retrieval",
+    "action_confidence": 0.70,
+    "human_review_required": false,
+    "decision_explanation": "Additional checks completed; use the selected route outcome."
   }
 }
 ```
@@ -315,10 +396,13 @@ The system includes a comprehensive **self-learning module** (`utils/self_learni
 | **Persistent Storage** | Automatically saves collected samples to `data/self_learning_samples.csv` across app sessions. |
 | **Learning Event Trigger** | When threshold of 20 samples collected (configurable), triggers safe non-destructive reclustering preview. |
 | **Non-Destructive Reclustering** | Runs alternative DBSCAN + FCM clustering on augmented dataset **without replacing** production SVM or artifacts. |
+| **Drift Detection Gate** | Opens retraining only when rolling SVM-gap degradation and FCM centroid movement both trigger. |
+| **Rollback Protection** | Provides backup, validation, and restore helpers before any future promoted model replaces production artifacts. |
 
 ### Integration with UI
 
 - **Self-Learning Status Dashboard** (User tab): Shows total samples collected, uncertain count, learning events triggered, and progress bar toward next trigger.
+- **Agentic Monitoring Zones**: Shows Cluster Health, SHAP Reliability, Action Dispatch, Outcome Tracking, and Drift Alerts using live inference values.
 - **Automatic Collection**: After every prediction, the engine collects inference outputs transparently.
 - **Persistence**: Samples automatically saved after each prediction; loaded on app restart.
 - **Testing Support**: `test_self_learning.py` validates collection, augmentation, learning triggers, and CSV persistence.
@@ -336,7 +420,11 @@ engine.collect_prediction(
     features=row_scaled,
     prediction_label="High Risk",
     confidence=0.75,
-    prediction_probabilities={"Low Risk": 0.1, "Medium Risk": 0.15, "High Risk": 0.75}
+    prediction_probabilities={"Low Risk": 0.1, "Medium Risk": 0.15, "High Risk": 0.75},
+    svm_gap=0.60,
+    fuzzy_membership=0.82,
+    agentic_score=78.4,
+    action_route="direct_dispatch",
 )
 
 # Check and trigger learning
@@ -385,7 +473,12 @@ engine.load_samples()
 | **Risk Visualization** | Color-coded badge (Low=green, Medium=yellow, High=red) with confidence %. |
 | **SHAP Feature Chart** | Top contributing features ranked by importance. |
 | **SARIMA Forecast Plot** | Actual vs. predicted dangerous cases with trend indicator. |
-| **Score Breakdown** | Transparent display of SVM, SHAP, Forecast, and Total scores (0-100). |
+| **Score Breakdown** | Transparent five-signal display: severity, SVM gap, FCM membership, SHAP reliability, ARIMA trend, and total score (0-100). |
+| **Cluster Health** | DBSCAN outlier count, predicted FCM membership, and baseline SVM gap. |
+| **SHAP Reliability** | Cosine similarity against cluster SHAP memory, reliability level, and matched memory label. |
+| **Action Dispatch** | ReAct route, RAG vote status, action confidence, and human-review flag. |
+| **Outcome Tracking** | Retrieved evidence count, RAG majority label, and vote confidence. |
+| **Drift Alerts** | Retrain gate, SVM-gap drop, centroid drift, and rollback-protection notes. |
 | **Clinical Summary Report** | Plain-language explanation with "Why?", "What to do?", "Alternatives" sections. |
 | **Email Alerts** | Sidebar to capture user email + HIGH-risk alert status. |
 | **Analyze Risk Button** | Triggers analysis with optional SMTP alert to ALERT_TO recipient. |
@@ -482,7 +575,7 @@ DDI_SIMULATE_HIGH_RISK=1  # (testing only) force HIGH tier after real model
 ### Report Workflow
 
 1. **Doctor submits pair** or **User runs "Analyze Risk"**.
-2. **Full pipeline runs**: SVM prediction → SHAP → SARIMA forecast → scoring.
+2. **Full pipeline runs**: SVM prediction → SHAP → SHAP memory reliability → FCM membership → five-signal scoring → borderline RAG → ReAct final decision.
 3. **`generate_report(context)` aggregates** all outputs into structured JSON.
 4. **Report persisted** to disk.
 5. **If HIGH risk + user email exists** → SMTP alert triggered.
@@ -546,15 +639,25 @@ DDI_SIMULATE_HIGH_RISK=1
 
 1. On startup, `app.py` checks for `models/pipeline_artifacts.joblib`.
 2. If **missing or incompatible** (version/MAX_TRAIN_ROWS mismatch) → **full pipeline trains**.
-3. Training includes: data cleaning, feature engineering, DBSCAN/FCM pseudo-labels, SVM training, SARIMA fitting.
+3. Training includes: data cleaning, feature engineering, DBSCAN/FCM pseudo-labels, SVM training, SARIMA fitting, SHAP memory creation, and RAG case-index creation.
 4. Artifacts serialized; cached for subsequent runs.
 5. **Subsequent runs** load cached pipeline for ~2-5 second startup.
+
+### Runtime artifacts
+
+| Artifact | Purpose |
+|----------|---------|
+| `models/pipeline_artifacts.joblib` | Versioned production pipeline: scaler, clustering metadata, SVM, forecast, SHAP memory reference, RAG index reference. |
+| `models/shap_cluster_memory.joblib` | Persistent cluster mean SHAP vectors, case SHAP vectors, cluster counts, and reliability thresholds. |
+| `models/rag_case_index.joblib` | Local `NearestNeighbors` index over feature + SHAP vectors for borderline retrieval. |
+| `data/self_learning_samples.csv` | Appended inference samples with prediction metadata, SVM gap, fuzzy membership, agentic score, and action route. |
 
 ### Performance Optimization
 
 - **Joblib Caching**: Production model loaded from disk artifact on every app run.
 - **Streamlit @st.cache_resource**: SelfLearningEngine, datasets, pipeline cached across widget interactions.
 - **Embedding Cache**: GNN embeddings pre-computed and cached to avoid recomputation.
+- **Agentic Cache**: SHAP memory and RAG index are built during training and loaded with `PipelineArtifacts` for inference.
 
 ---
 
@@ -573,6 +676,9 @@ DDI_SIMULATE_HIGH_RISK=1
 - **DDI_SIMULATE_HIGH_RISK=1**: Manually test HIGH-risk email path without real data.
 - **Manual doctor submission**: Submit via Doctor tab, verify report persisted and displayed.
 - **Manual email validation**: Configure SMTP, trigger Analyze Risk with non-Low Risk prediction.
+- **Agentic decision smoke test**: Run `infer_pair(...)` and verify `prediction["agentic_decision"]`, `prediction["scores"]`, `prediction["shap_reliability"]`, `prediction["rag_result"]`, and `prediction["final_decision"]` are present.
+- **RAG evidence quality**: Check that weak neighbors below `RetrievalConfig.min_similarity` appear in `rejected_cases` and do not affect majority voting.
+- **Drift gate validation**: Confirm retraining is not triggered unless both rolling SVM-gap degradation and centroid movement are above configured thresholds.
 
 ---
 
@@ -584,7 +690,9 @@ DDI_SIMULATE_HIGH_RISK=1
 ├── SELF_LEARNING_README.md                 # Extended self-learning documentation
 ├── test_self_learning.py                   # Self-learning module tests
 ├── models/
-│   └── pipeline_artifacts.joblib           # Cached training payload
+│   ├── pipeline_artifacts.joblib           # Cached training payload
+│   ├── shap_cluster_memory.joblib          # Cluster SHAP memory artifact
+│   └── rag_case_index.joblib               # Borderline retrieval index
 ├── data/
 │   ├── drug_drug_interactions.csv          # Base DDI dataset
 │   ├── drug_classification.csv             # Patient/drug context
@@ -602,7 +710,11 @@ DDI_SIMULATE_HIGH_RISK=1
 │   ├── pipeline.py                         # Main orchestration (train/load/infer)
 │   ├── explainability.py                   # SHAP + fallback sensitivity
 │   ├── forecasting.py                      # SARIMA daily risk series
-│   ├── scoring.py                          # Composite scoring system
+│   ├── scoring.py                          # Five-signal agentic scoring system
+│   ├── shap_memory.py                      # Persistent cluster SHAP memory
+│   ├── rag_retrieval.py                    # Lightweight RAG retrieval
+│   ├── react_engine.py                     # ReAct action dispatch
+│   ├── drift_detection.py                  # Drift gates + rollback helpers
 │   ├── alerts.py                           # SMTP alerts (Analyze Risk path)
 │   └── self_learning.py                    # Collection + augmentation + learning
 ├── advanced_ai_pipeline/

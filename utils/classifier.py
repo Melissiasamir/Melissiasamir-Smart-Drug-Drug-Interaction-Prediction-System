@@ -1,4 +1,4 @@
-"""# 6. Classification Model
+"""# 6. (classifier.py)Classification Model
 
 Trains an SVM with RBF kernel using GridSearchCV and cross-validation.
 """
