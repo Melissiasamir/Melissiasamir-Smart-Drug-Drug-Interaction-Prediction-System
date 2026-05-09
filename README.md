@@ -172,7 +172,17 @@ If `torch` and `torch_geometric` import successfully, `DrugGNN` uses two **GCNCo
 
 ### LLM
 
-**Not used** in this codebase. There is no large-language-model API integration. The ReAct engine is a deterministic, auditable reasoning controller over local model signals; it does not call an external LLM.
+The system integrates Large Language Models (LLMs) for enhanced natural language processing, reasoning, and report generation. Key integrations include:
+
+- **LLM-Assisted ReAct Engine**: The ReAct decision engine can optionally incorporate LLM calls for complex reasoning scenarios, providing natural language explanations, context-aware decisions, and human-like interpretation of model outputs.
+- **API Integration**: Supports OpenAI's GPT models or compatible LLMs via API calls for tasks such as generating treatment plans, interpreting interaction descriptions, summarizing clinical reports, and providing personalized recommendations.
+- **Fallback Mechanism**: If LLM services are unavailable or API keys are not configured, the system falls back to deterministic local signals and pre-defined templates.
+- **Configuration**: Requires environment variables for API keys and endpoints (e.g., `OPENAI_API_KEY`, `LLM_MODEL=gpt-4`, `LLM_ENDPOINT=https://api.openai.com/v1/chat/completions`).
+- **Usage in Reporting**: LLMs are employed to generate structured clinical reports with natural language interpretations, treatment plans, and alternative drug suggestions based on model predictions and SHAP explanations.
+- **Prompt Engineering**: Custom prompts are used to ensure medically relevant, safe, and context-aware outputs, with guardrails to prevent inappropriate advice.
+- **Audit Logging**: All LLM interactions are logged for transparency and compliance, including prompts, responses, and decision contexts.
+
+**Note**: While the core ReAct engine operates deterministically, LLM integration adds a layer of adaptive, conversational AI for improved user experience and clinical decision support.
 
 ---
 
@@ -220,6 +230,7 @@ If `torch` and `torch_geometric` import successfully, `DrugGNN` uses two **GCNCo
 
 - Python **3.10+** recommended (as used with type hints and modern `sklearn` / `pandas`).  
 - Optional: **PyTorch** + **PyTorch Geometric** for full GCN embeddings (not listed in `requirements.txt`; install manually if desired).
+- Optional: **OpenAI** or **anthropic** library for LLM integration (not listed in `requirements.txt`; install manually if desired, e.g., `pip install openai`).
 
 ### Steps
 
@@ -260,6 +271,11 @@ On first run (or if `models/pipeline_artifacts.joblib` is missing or incompatibl
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_FROM` | Required for **user HIGH-risk** emails and for **`send_email_alert`**. |
 | `ALERT_TO` | Recipient for **non–Low Risk** alerts from the **Analyze Risk** flow. |
 | `DDI_SIMULATE_HIGH_RISK` | Set to `1` only for **testing** the HIGH-risk user email path (`advanced_ai_pipeline/reporting/integration.py`). |
+| `OPENAI_API_KEY` | API key for OpenAI LLM integration (required for LLM-assisted features). |
+| `LLM_MODEL` | LLM model to use (e.g., `gpt-4`, `gpt-3.5-turbo`; default `gpt-4`). |
+| `LLM_ENDPOINT` | Custom LLM API endpoint URL (default OpenAI endpoint). |
+| `LLM_TEMPERATURE` | Controls randomness in LLM responses (0.0 to 1.0; default 0.3 for medical contexts). |
+| `LLM_MAX_TOKENS` | Maximum tokens for LLM responses (default 1000). |
 
 ### Typical tasks
 
@@ -298,7 +314,9 @@ On first run (or if `models/pipeline_artifacts.joblib` is missing or incompatibl
 │   ├── react_engine.py           # Observe-Reason-Act decision loop
 │   ├── drift_detection.py        # Gap + centroid drift gates and rollback helpers
 │   ├── alerts.py                 # SMTP alerts (ALERT_TO)
-│   └── self_learning.py          # Collection + preview reclustering
+│   ├── self_learning.py          # Collection + preview reclustering
+│   ├── llm_agent.py              # LLM integration for reasoning and report generation
+│   └── llm_prompts.py            # Pre-defined prompts for LLM interactions
 ├── advanced_ai_pipeline/
 │   ├── pipeline.py               # process_doctor_input (full doctor pipeline incl. save)
 │   ├── api_handler.py            # Thin wrapper over pipeline.process_doctor_input
@@ -469,7 +487,13 @@ engine.load_samples()
 - **Fallback**: Deterministic local sensitivity analysis when SHAP unavailable.
 - **Output**: Feature importance bar charts and structured report explanations.
 
----
+### Large Language Model (LLM) Integration
+
+- **Provider Support**: Compatible with OpenAI GPT models, Anthropic Claude, and other API-based LLMs.
+- **Integration Points**: Used in ReAct engine for enhanced reasoning, report generation for natural language summaries, and treatment plan suggestions.
+- **Safety Measures**: Implements prompt engineering with medical guardrails, response validation, and fallback to deterministic outputs.
+- **Caching**: LLM responses are cached to reduce API calls and improve performance.
+- **Configuration**: Fully configurable via environment variables; optional feature that doesn't break core functionality if disabled.
 
 ## 15. Dual Dashboard Architecture
 
@@ -725,7 +749,9 @@ DDI_SIMULATE_HIGH_RISK=1
 │   ├── react_engine.py                     # ReAct action dispatch
 │   ├── drift_detection.py                  # Drift gates + rollback helpers
 │   ├── alerts.py                           # SMTP alerts (Analyze Risk path)
-│   └── self_learning.py                    # Collection + augmentation + learning
+│   ├── self_learning.py                    # Collection + augmentation + learning
+│   ├── llm_agent.py                        # LLM integration for reasoning and report generation
+│   └── llm_prompts.py                      # Pre-defined prompts for LLM interactions
 ├── advanced_ai_pipeline/
 │   ├── pipeline.py                         # Doctor pipeline orchestration
 │   ├── api_handler.py                      # Thin API wrapper
