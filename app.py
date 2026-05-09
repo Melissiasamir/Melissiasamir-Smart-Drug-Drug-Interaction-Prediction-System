@@ -35,6 +35,7 @@ from utils.forecasting import forecast_plot
 from utils.pipeline import infer_pair, load_or_train_pipeline
 from utils.preprocessing import clean_ddi_data
 from utils.self_learning import SelfLearningEngine, SelfLearningConfig
+from utils.llm_treatment_agent import LLMTreatmentAgent
 
 
 load_dotenv()
@@ -486,6 +487,13 @@ st.markdown(
 def get_artifacts():
     return load_or_train_pipeline()
 
+
+@st.cache_resource(show_spinner=False)
+def get_llm_agent():
+
+    return LLMTreatmentAgent()
+
+
 @st.cache_data(show_spinner=False)
 def get_drug_options() -> list[str]:
     ddi, _ = load_datasets()
@@ -857,7 +865,34 @@ if run:
     react_decision = prediction["react_decision"]
     rag_result = prediction["rag_result"]
 
+    llm_plan = None
+
+    should_run_llm = (
+        prediction["label"].lower() == "high risk"
+        or react_decision.get("human_review_required", False)
+        or prediction.get("confidence", 1.0) < 0.80
+    )
+
+    if should_run_llm:
+
+        llm_agent = get_llm_agent()
+
+        drift_status = prediction.get(
+            "drift_status",
+            {},
+        )
+
+        llm_plan = llm_agent.generate_plan(
+            prediction=prediction,
+            scores=scores,
+            shap_importance=shap_importance,
+            rag_result=rag_result,
+            react_decision=react_decision,
+            drift_status=drift_status,
+        )
+
     self_learning_engine = get_self_learning_engine()
+
 
     self_learning_engine.collect_prediction(
         drug_a=drug_a,
@@ -987,6 +1022,17 @@ if run:
         st.metric("Review Required", "Yes" if react_decision["human_review_required"] else "No")
     with st.expander("ReAct trace", expanded=False):
         st.dataframe(pd.DataFrame(react_decision["trace"]), width="stretch")
+
+    # 🧠 LLM Treatment Plan Section
+    render_html('<div class="section-title">🧠 LLM Treatment Plan</div>')
+
+    if llm_plan is not None:
+        st.json(llm_plan)
+    else:
+        st.info(
+                "LLM reasoning skipped because the case is stable and low risk."
+            )
+
 
     render_html('<div class="section-title">Outcome Tracking</div>')
     o1, o2, o3 = st.columns(3)

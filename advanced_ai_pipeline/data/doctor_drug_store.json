@@ -28,7 +28,7 @@
       0.0,
       0.0
     ],
-    "cluster": 0
+    "cluster": 2
   },
   "Ibuprofen": {
     "name": "Ibuprofen",
@@ -90,7 +90,7 @@
       0.0,
       0.0
     ],
-    "cluster": 2
+    "cluster": 6
   },
   "Morphine": {
     "name": "Morphine",
@@ -121,7 +121,7 @@
       0.0,
       0.0
     ],
-    "cluster": 5
+    "cluster": 3
   },
   "Diazepam": {
     "name": "Diazepam",
@@ -152,7 +152,7 @@
       0.0,
       0.0
     ],
-    "cluster": 3
+    "cluster": 1
   },
   "Abacavir": {
     "name": "Abacavir",
@@ -183,7 +183,7 @@
       0.0,
       0.0
     ],
-    "cluster": 0
+    "cluster": 7
   },
   "Abemaciclib": {
     "name": "Abemaciclib",
@@ -214,6 +214,37 @@
       0.0,
       0.0
     ],
-    "cluster": 1
+    "cluster": 4
+  },
+  "Alclofenac": {
+    "name": "Alclofenac",
+    "input": "Alclofenac",
+    "features": {
+      "name_length": 10.0,
+      "unique_char_ratio": 0.7,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.4,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.09870076599494207,
+      0.0,
+      0.9870076599494206,
+      0.06909053619645944,
+      0.03948030639797683,
+      0.09870076599494207,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 0
   }
 }

@@ -30,6 +30,7 @@ The system is designed to demonstrate how modern ML pipelines are assembled for 
 - **Embedding clustering & similarity (advanced path)** — `KMeans` over drug embeddings where enough points exist; cosine similarity ranking for alternative drugs (`advanced_ai_pipeline/clustering/embedding_cluster.py`, `similarity/similarity_engine.py`).
 - **Dynamic / self-learning behavior** — Collects uncertain inferences plus agentic metadata, augments samples, can run a **non-destructive DBSCAN + FCM preview**, and evaluates drift using both SVM-gap degradation and centroid movement (`utils/self_learning.py`, `utils/drift_detection.py`, surfaced in `app.py`).
 - **AI reporting system** — After a doctor saves a reviewed interaction, the pipeline aggregates SVM output, SHAP, five-signal score, SHAP reliability, ReAct decision, forecast direction, production clustering metadata, and advanced similarity into a **structured JSON report** persisted under `data/last_clinical_report.json` (`advanced_ai_pipeline/reporting/`).
+- **REST API support** — A production-ready FastAPI wrapper is implemented in `api/app.py`, exposing `GET /health`, `POST /predict`, and `POST /react` with startup artifact loading, audit logging to `logs/api_audit.jsonl`, and clean error handling.
 - **Email alert systems (two channels)**  
   - **User dashboard HIGH-risk path:** SMTP email to the address stored in `data/user_profile.json` when the aggregated report tier is `HIGH` (`advanced_ai_pipeline/reporting/email_service.py`).  
   - **User “Analyze Risk” path:** SMTP alert to `ALERT_TO` for any prediction that is **not** `Low Risk`, including SHAP/forecast context (`utils/alerts.py`, `app.py`).
@@ -243,6 +244,12 @@ Copy `.env` if you use one (the app calls `load_dotenv()` from `python-dotenv`).
 streamlit run app.py
 ```
 
+Alternatively, run the REST API server with:
+
+```bash
+uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
 On first run (or if `models/pipeline_artifacts.joblib` is missing or incompatible), the app **trains** the full pipeline and writes artifacts. Later runs **load** cached artifacts for faster startup.
 
 ### Environment variables
@@ -379,6 +386,8 @@ Exact strings and scores depend on data, model seeding, and the submitted pair.
 - **Larger, longitudinal real-world datasets** — replace or augment synthetic date logic with true event timestamps and external validation cohorts.  
 - **Federated or privacy-preserving learning** — extend the self-learning collector toward multi-site aggregation without centralizing raw PHI.  
 - **Formal knowledge integration** — link predictions to curated databases (e.g. DrugBank, ONC high-value data) for traceable citations.
+
+**Implemented note:** The FastAPI wrapper is already implemented in `api/app.py`, with `GET /health`, `POST /predict`, and `POST /react` endpoints, startup pipeline artifact loading, and audit logging to `logs/api_audit.jsonl`. The advanced doctor pipeline integration is available through `advanced_ai_pipeline/pipeline.py` and `advanced_ai_pipeline/api_handler.py`.
 
 ---
 
