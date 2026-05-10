@@ -152,7 +152,7 @@
       0.0,
       0.0
     ],
-    "cluster": 1
+    "cluster": 5
   },
   "Abacavir": {
     "name": "Abacavir",
@@ -246,5 +246,67 @@
       0.0
     ],
     "cluster": 0
+  },
+  "Aceprometazine": {
+    "name": "Aceprometazine",
+    "input": "Aceprometazine",
+    "features": {
+      "name_length": 14.0,
+      "unique_char_ratio": 0.7857142857142857,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.5,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.07091175926988605,
+      0.0,
+      0.9927646297784046,
+      0.05571638228348189,
+      0.035455879634943024,
+      0.07091175926988605,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 0
+  },
+  "Aceclofenac": {
+    "name": "Aceclofenac",
+    "input": "Aceclofenac",
+    "features": {
+      "name_length": 11.0,
+      "unique_char_ratio": 0.6363636363636364,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.45454545454545453,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.08994363563789855,
+      0.0,
+      0.9893799920168841,
+      0.057236859042299075,
+      0.04088347074449934,
+      0.08994363563789855,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 2
   }
 }
