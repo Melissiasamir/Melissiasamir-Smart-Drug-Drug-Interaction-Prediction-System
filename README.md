@@ -92,6 +92,28 @@ User “Analyze Risk” path (additional):
     → Optional SMTP alert to ALERT_TO when risk ≠ Low Risk
 ```
 
+### Advanced AI pipeline doctor path
+
+Doctor-submitted pairs may flow through the optional advanced AI extension in `advanced_ai_pipeline/`. This extension is designed to augment the core pipeline while preserving existing behavior.
+
+- The doctor submission is saved to `data/doctor_added_interactions.xlsx`.
+- The drug interaction graph is loaded or rebuilt from base DDI data plus doctor-submitted interactions.
+- Drug features are extracted and embeddings are generated using GNN or a fallback feature-based method.
+- Embedding clusters are assigned and cosine-similarity neighbors are computed.
+- Doctor-specific persistence is saved to `advanced_ai_pipeline/data/doctor_drug_store.json`.
+- A structured clinical report is generated and persisted to `data/last_clinical_report.json`, with optional HIGH-risk alerts.
+
+Optional programmatic usage:
+
+```python
+from advanced_ai_pipeline.api_handler import handle_doctor_input
+
+result = handle_doctor_input("Aspirin", "Ibuprofen", "Doctor recommended evaluation")
+print(result)
+```
+
+The CLI helper `advanced_ai_pipeline/run_pipeline.py` is also available for manual pipeline testing.
+
 ---
 
 ## 5. AI components explained
@@ -262,6 +284,64 @@ uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 On first run (or if `models/pipeline_artifacts.joblib` is missing or incompatible), the app **trains** the full pipeline and writes artifacts. Later runs **load** cached artifacts for faster startup.
+
+### REST API details
+
+The FastAPI wrapper in `api/app.py` is a thin service layer that reuses the existing inference pipeline and loads artifacts once on startup.
+
+#### Endpoints
+
+- `GET /health`
+  - Returns current service health and component availability.
+  - Example response:
+  ```json
+  {
+    "status": "healthy",
+    "model_loaded": true,
+    "shap_memory_available": true,
+    "rag_available": true,
+    "drift_monitoring_enabled": true,
+    "timestamp": "2024-01-01T12:00:00"
+  }
+  ```
+
+- `POST /predict`
+  - Runs the full risk prediction pipeline, including SVM, SHAP, scoring, RAG retrieval, and ReAct decision routing.
+  - Request example:
+  ```json
+  {
+    "drug_a": "Aspirin",
+    "drug_b": "Warfarin"
+  }
+  ```
+  - The response includes `prediction_label`, `confidence`, `probabilities`, `scores`, `shap_reliability`, `rag_results`, `react_decision`, and `final_decision`.
+
+- `POST /react`
+  - Runs only the ReAct reasoning engine and returns the decision route and action recommendation.
+  - Request example:
+  ```json
+  {
+    "drug_a": "Aspirin",
+    "drug_b": "Warfarin"
+  }
+  ```
+
+- `GET /drift/status`
+  - Returns the current drift monitoring status and retraining gate state.
+  - Example response:
+  ```json
+  {
+    "drift_triggered": false,
+    "centroid_drift": 0.12,
+    "svm_gap_degradation": 0.05,
+    "retraining_gate_status": "closed",
+    "rollback_protection_status": "available"
+  }
+  ```
+
+#### Audit logging
+
+All API requests are audited to `logs/api_audit.jsonl` with timestamp, drug pair, endpoint, final decision, confidence, and drift status.
 
 ### Environment variables
 
@@ -463,6 +543,25 @@ if engine.should_trigger_learning():
 engine.persist_samples()
 engine.load_samples()
 ```
+
+### Configuration & lifecycle
+
+The self-learning engine is configured through `utils/self_learning.py` and supports runtime persistence of prediction samples.
+
+A typical configuration includes:
+- `sample_collection_threshold=20`
+- `uncertainty_confidence_threshold=0.6`
+- `augmentation_noise_std=0.05`
+- `persist_to_csv=True`
+- `csv_path="data/self_learning_samples.csv"`
+
+The self-learning lifecycle is:
+1. Capture inference output after each `infer_pair` call.
+2. Flag low-confidence cases and uncertain predictions.
+3. Persist collected samples to CSV for continuity.
+4. When the collection threshold is reached, prepare augmented preview datasets.
+5. Run a safe non-destructive reclustering check without replacing current production artifacts.
+6. Keep production behavior unchanged unless a learning event is explicitly promoted.
 
 ---
 
