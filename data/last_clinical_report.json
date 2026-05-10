@@ -1,31 +1,55 @@
 {
-  "risk_level": "HIGH",
-  "confidence": 0.9386301157723218,
-  "interpretation": "SVM risk tier: Low Risk (mapped to HIGH). Model confidence 93.9%. Aggregate score 32.1/100. Forecast indicates increasing dangerous-case activity. Embedding clusters: drug 1 cluster 0, drug 2 cluster 2. Clinician note excerpt: Test high path",
+  "risk_level": "LOW",
+  "confidence": 0.9904537208987126,
+  "interpretation": "SVM risk tier: Low Risk (mapped to LOW). Model confidence 99.0%. Aggregate score 58.7/100. Forecast indicates increasing dangerous-case activity. Embedding clusters: drug 1 cluster 6, drug 2 cluster 0. Clinician note excerpt: Increased gastrointestinal bleeding and ulcer risk.",
   "key_factors": [
-    "name_similarity (importance 0.0387)",
-    "drug2_frequency (importance 0.0032)",
-    "description_length (importance 0.0016)",
-    "drug1_frequency (importance 0.0002)",
-    "similarity_score (importance 0.0001)",
-    "co_occurrence (importance 0.0000)"
+    "description_severity (importance 0.2603)",
+    "co_occurrence (importance 0.1715)",
+    "description_length (importance 0.1442)",
+    "similarity_score (importance 0.1220)",
+    "drug2_frequency (importance 0.0410)",
+    "name_similarity (importance 0.0329)"
   ],
   "trend": "Forecast indicates increasing dangerous-case activity.",
   "treatment_plan": [
-    "Immediate action: avoid this combination when possible, escalate to a clinical reviewer, and consider a safer alternative such as Aspirin.",
+    "Continue routine monitoring; confirm no patient-specific contraindications.",
     "Reconcile the medication list and document the decision in the chart.",
     "If proceeding, define monitoring labs or vitals appropriate to the interaction class.",
     "Pipeline clustering status: No reclustering needed; forecast_error <= threshold"
   ],
   "alternatives": [
-    "Aspirin",
+    "Ibuprofen",
+    "Diazepam",
+    "Morphine",
     "Warfarin",
-    "Ibuprofen"
+    "Abacavir",
+    "Prednisone",
+    "Alclofenac",
+    "Abemaciclib"
   ],
-  "recommended_action": "Immediate action: avoid this combination when possible, escalate to a clinical reviewer, and consider a safer alternative such as Aspirin.",
+  "recommended_action": "Continue routine monitoring; confirm no patient-specific contraindications.",
   "note": "This report aggregates automated signals (SVM, SHAP, SARIMA trend, production clustering, and embedding similarity). It supports\u2014not replaces\u2014clinical judgment.",
-  "drug_1": "Aspirin",
-  "drug_2": "Warfarin",
+  "drug_1": "Ibuprofen",
+  "drug_2": "Prednisone",
   "svm_label": "Low Risk",
-  "total_score": 32.09246645833278
+  "total_score": 58.7314157000129,
+  "user_risk_heading": "RISK: LOW / SAFE \ud83d\udfe2",
+  "user_why_bullets": [
+    "The automatic check did not flag Ibuprofen and Prednisone at a high concern level.",
+    "This does not guarantee safety for every person or dose."
+  ],
+  "user_action_bullets": [
+    "Still follow your prescriber\u2019s instructions.",
+    "Tell your care team if anything changes with your health or other medicines."
+  ],
+  "user_alternatives_bullets": [
+    "Ibuprofen",
+    "Diazepam",
+    "Morphine",
+    "Warfarin",
+    "Abacavir",
+    "Prednisone"
+  ],
+  "user_email_subject": "Drug interaction check \u2014 low concern",
+  "user_email_body": "RISK: LOW / SAFE \ud83d\udfe2\n\nMedicines: Ibuprofen + Prednisone\n\nWhy:\n  \u2022 The automatic check did not flag Ibuprofen and Prednisone at a high concern level.\n  \u2022 This does not guarantee safety for every person or dose.\n\nTips:\n  \u2022 Still follow your prescriber\u2019s instructions.\n  \u2022 Tell your care team if anything changes with your health or other medicines."
 }

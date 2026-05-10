@@ -59,7 +59,7 @@
       0.0,
       0.0
     ],
-    "cluster": 1
+    "cluster": 6
   },
   "Warfarin": {
     "name": "Warfarin",
@@ -152,7 +152,7 @@
       0.0,
       0.0
     ],
-    "cluster": 5
+    "cluster": 1
   },
   "Abacavir": {
     "name": "Abacavir",
@@ -183,7 +183,7 @@
       0.0,
       0.0
     ],
-    "cluster": 7
+    "cluster": 1
   },
   "Abemaciclib": {
     "name": "Abemaciclib",
@@ -214,7 +214,7 @@
       0.0,
       0.0
     ],
-    "cluster": 4
+    "cluster": 2
   },
   "Alclofenac": {
     "name": "Alclofenac",
@@ -308,5 +308,36 @@
       0.0
     ],
     "cluster": 2
+  },
+  "Prednisone": {
+    "name": "Prednisone",
+    "input": "Prednisone",
+    "features": {
+      "name_length": 10.0,
+      "unique_char_ratio": 0.8,
+      "alpha_ratio": 1.0,
+      "digit_ratio": 0.0,
+      "vowel_ratio": 0.4,
+      "word_count": 1.0
+    },
+    "embedding": [
+      0.09862873039405895,
+      0.0,
+      0.9862873039405896,
+      0.07890298431524717,
+      0.039451492157623586,
+      0.09862873039405895,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cluster": 0
   }
 }
